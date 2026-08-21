@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { ATTRIBUTE_INFO, ATTRIBUTE_KEYS, getCharacterClass, getCharacterLevel, getTier, xpToNextLevel } from '../lib/rpg';
-import { isAtRisk, isDecaying } from '../lib/rpg';
+import { getNextPerk, getUnlockedPerks, isAtRisk, isDecaying } from '../lib/rpg';
 import { XpBar } from '../components/XpBar';
 import { Avatar } from '../components/Avatar';
+import { WalkingCharacter } from '../components/WalkingCharacter';
 import { Settings } from './Settings';
 
 export function CharacterSheet() {
@@ -64,6 +65,8 @@ export function CharacterSheet() {
         </div>
       </div>
 
+      <WalkingCharacter attribute={dominantAttribute} />
+
       {(decayingCount > 0 || atRiskCount > 0) && (
         <div className="rounded-xl border border-blood-500/50 bg-blood-500/10 px-4 py-3 text-sm">
           {decayingCount > 0 && (
@@ -84,6 +87,8 @@ export function CharacterSheet() {
         {ATTRIBUTE_KEYS.map((key) => {
           const attr = character.attributes[key];
           const info = ATTRIBUTE_INFO[key];
+          const unlockedPerks = getUnlockedPerks(key, attr.level);
+          const nextPerk = getNextPerk(key, attr.level);
           return (
             <div key={key} className="parchment-border rounded-xl bg-ink-800/50 p-3">
               <div className="flex items-baseline justify-between">
@@ -101,6 +106,26 @@ export function CharacterSheet() {
               <div className="mt-1 text-right text-[11px] text-white/35">
                 {attr.xp} / {xpToNextLevel(attr.level)} XP
               </div>
+
+              {unlockedPerks.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {unlockedPerks.map((perk) => (
+                    <span
+                      key={perk.level}
+                      title={perk.description}
+                      className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                      style={{ background: `color-mix(in srgb, ${info.color} 20%, transparent)`, color: info.color }}
+                    >
+                      {perk.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {nextPerk && (
+                <p className="mt-1.5 text-[11px] text-white/30">
+                  Next perk at Lv {nextPerk.level}: {nextPerk.name}
+                </p>
+              )}
             </div>
           );
         })}

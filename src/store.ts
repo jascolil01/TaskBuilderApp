@@ -10,7 +10,8 @@ import type {
   Reward,
 } from './types';
 import { todayStr } from './lib/date';
-import { addXp, createAttributes, GOLD_PER_XP, processHabitDecay, removeXp } from './lib/rpg';
+import { addXp, createAttributes, getCrossedPerks, GOLD_PER_XP, processHabitDecay, removeXp } from './lib/rpg';
+import { useToastStore } from './toastStore';
 
 function makeId(): string {
   return crypto.randomUUID();
@@ -180,6 +181,14 @@ export const useStore = create<Store>()(
           xpAwarded: habit.xpReward,
           goldAwarded,
         };
+
+        const oldLevel = state.character.attributes[habit.attribute].level;
+        const newAttrState = addXp(state.character.attributes[habit.attribute], habit.xpReward);
+        const crossedPerks = getCrossedPerks(habit.attribute, oldLevel, newAttrState.level);
+        if (crossedPerks.length > 0) {
+          const perk = crossedPerks[crossedPerks.length - 1];
+          useToastStore.getState().show(`🎉 Perk unlocked: ${perk.name} (${habit.attribute} Lv ${perk.level})`);
+        }
 
         set((s) => ({
           character: {

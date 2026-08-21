@@ -143,6 +143,71 @@ export function getTier(level: number): Tier {
   return { name: 'Bronze', ring: '#b08d57' };
 }
 
+export interface Perk {
+  level: number;
+  name: string;
+  description: string;
+}
+
+export const PERKS: Record<AttributeKey, Perk[]> = {
+  STR: [
+    { level: 3, name: 'Steady Grip', description: 'Physical habits start to feel a little easier.' },
+    { level: 6, name: 'Iron Sinew', description: 'Your training compounds — every workout hits harder.' },
+    { level: 10, name: 'Battle-Hardened', description: 'Recognized as someone who trains seriously.' },
+    { level: 15, name: 'Juggernaut', description: 'Raw physical power, hard to knock down.' },
+    { level: 20, name: 'Legendary Warrior', description: 'Your strength has become the stuff of legend.' },
+  ],
+  DEX: [
+    { level: 3, name: 'Light Feet', description: 'New skills click a little faster.' },
+    { level: 6, name: 'Quick Hands', description: 'Practiced reflexes start to show.' },
+    { level: 10, name: 'Practiced Precision', description: 'Consistency has sharpened your technique.' },
+    { level: 15, name: 'Shadow Step', description: 'You move through routines with total ease.' },
+    { level: 20, name: 'Master of Motion', description: 'Elite-level coordination and control.' },
+  ],
+  CON: [
+    { level: 3, name: 'Early Riser', description: 'Healthy routines are starting to stick.' },
+    { level: 6, name: 'Iron Stomach', description: 'Your habits have built real resilience.' },
+    { level: 10, name: 'Unshakable', description: 'Hard to knock off your routine now.' },
+    { level: 15, name: 'Bastion', description: 'A foundation of health others can lean on.' },
+    { level: 20, name: 'Undying Guardian', description: 'Endurance that borders on legendary.' },
+  ],
+  INT: [
+    { level: 3, name: 'Curious Mind', description: 'Learning is starting to become a habit.' },
+    { level: 6, name: 'Well-Read', description: 'Your knowledge base is visibly growing.' },
+    { level: 10, name: 'Sharp Focus', description: 'Deep work comes easier than it used to.' },
+    { level: 15, name: 'Arcane Scholar', description: 'A genuine expert in the making.' },
+    { level: 20, name: 'Archmage', description: 'Mastery of knowledge few ever reach.' },
+  ],
+  WIS: [
+    { level: 3, name: 'Mindful Pause', description: 'Reflection is becoming second nature.' },
+    { level: 6, name: 'Inner Calm', description: 'Discipline is steadying your days.' },
+    { level: 10, name: 'Clear Sight', description: 'Better judgment, born from practice.' },
+    { level: 15, name: 'Serene Discipline', description: 'Composure that rarely cracks.' },
+    { level: 20, name: 'Enlightened', description: 'A rare, hard-won clarity of mind.' },
+  ],
+  CHA: [
+    { level: 3, name: 'Warm Presence', description: 'Connection is coming more naturally.' },
+    { level: 6, name: 'Easy Rapport', description: 'People notice your growing confidence.' },
+    { level: 10, name: 'Silver Tongue', description: 'Your words carry real weight now.' },
+    { level: 15, name: 'Magnetic', description: 'A presence that draws people in.' },
+    { level: 20, name: 'Legendary Bard', description: 'Charisma that becomes the stuff of stories.' },
+  ],
+};
+
+export function getUnlockedPerks(attribute: AttributeKey, level: number): Perk[] {
+  return PERKS[attribute].filter((p) => p.level <= level);
+}
+
+export function getNextPerk(attribute: AttributeKey, level: number): Perk | null {
+  return PERKS[attribute].find((p) => p.level > level) ?? null;
+}
+
+/** Perks whose threshold sits in (oldLevel, newLevel] — used to fire unlock celebrations. */
+export function getCrossedPerks(attribute: AttributeKey, oldLevel: number, newLevel: number): Perk[] {
+  if (newLevel <= oldLevel) return [];
+  return PERKS[attribute].filter((p) => p.level > oldLevel && p.level <= newLevel);
+}
+
 export function isDecaying(habit: Habit): boolean {
   return !habit.archived && habit.missedSinceCompletion > habit.graceDays;
 }
