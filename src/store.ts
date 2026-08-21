@@ -78,22 +78,30 @@ interface Store {
   updateReward: (id: string, patch: Partial<Pick<Reward, 'name' | 'cost'>>) => void;
   deleteReward: (id: string) => void;
   redeemReward: (id: string) => void;
+
+  resetAll: () => void;
+}
+
+function createInitialState() {
+  return {
+    character: {
+      name: '',
+      createdAt: new Date().toISOString(),
+      attributes: createAttributes(),
+      gold: 0,
+      lastDecayCheck: todayStr(),
+    },
+    habits: starterHabits(),
+    completions: [] as CompletionEntry[],
+    rewards: starterRewards(),
+    redemptions: [] as RedemptionEntry[],
+  };
 }
 
 export const useStore = create<Store>()(
   persist(
     (set, get) => ({
-      character: {
-        name: '',
-        createdAt: new Date().toISOString(),
-        attributes: createAttributes(),
-        gold: 0,
-        lastDecayCheck: todayStr(),
-      },
-      habits: starterHabits(),
-      completions: [],
-      rewards: starterRewards(),
-      redemptions: [],
+      ...createInitialState(),
 
       setCharacterName: (name) =>
         set((state) => ({ character: { ...state.character, name: name.trim().slice(0, 24) } })),
@@ -277,6 +285,8 @@ export const useStore = create<Store>()(
           redemptions: [...s.redemptions, entry],
         }));
       },
+
+      resetAll: () => set(createInitialState()),
     }),
     { name: 'questlog-rpg-storage' },
   ),

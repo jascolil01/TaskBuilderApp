@@ -1,14 +1,16 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { ATTRIBUTE_INFO, ATTRIBUTE_KEYS, getCharacterClass, getCharacterLevel, getTier, xpToNextLevel } from '../lib/rpg';
 import { isAtRisk, isDecaying } from '../lib/rpg';
 import { XpBar } from '../components/XpBar';
 import { Avatar } from '../components/Avatar';
+import { Settings } from './Settings';
 
 export function CharacterSheet() {
   const character = useStore((s) => s.character);
   const allHabits = useStore((s) => s.habits);
   const habits = useMemo(() => allHabits.filter((h) => !h.archived), [allHabits]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const level = useMemo(() => getCharacterLevel(character.attributes), [character.attributes]);
   const { attribute: dominantAttribute, className } = useMemo(
@@ -30,7 +32,17 @@ export function CharacterSheet() {
 
   return (
     <div className="flex flex-col gap-5 px-4 pb-28 pt-6">
-      <div className="parchment-border rounded-2xl bg-ink-800/60 p-5 text-center">
+      <div className="flex justify-end">
+        <button
+          onClick={() => setSettingsOpen(true)}
+          aria-label="Settings"
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-white/50 active:scale-90"
+        >
+          ⚙
+        </button>
+      </div>
+
+      <div className="parchment-border -mt-3 rounded-2xl bg-ink-800/60 p-5 text-center">
         <div className="mb-3">
           <Avatar attribute={dominantAttribute} level={level} size={84} />
         </div>
@@ -93,6 +105,8 @@ export function CharacterSheet() {
           );
         })}
       </div>
+
+      {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }
