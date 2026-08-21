@@ -3,6 +3,7 @@ import { useStore } from './store';
 import { BottomNav, type Screen } from './components/BottomNav';
 import { CharacterSheet } from './screens/CharacterSheet';
 import { QuestLog } from './screens/QuestLog';
+import { Shop } from './screens/Shop';
 import { Onboarding } from './screens/Onboarding';
 
 function App() {
@@ -25,7 +26,9 @@ function App() {
 
   return (
     <>
-      {screen === 'character' ? <CharacterSheet /> : <QuestLog />}
+      {screen === 'character' && <CharacterSheet />}
+      {screen === 'quests' && <QuestLog />}
+      {screen === 'shop' && <Shop />}
       <BottomNav screen={screen} onChange={setScreen} />
     </>
   );

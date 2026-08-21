@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
 import { useStore } from '../store';
-import { ATTRIBUTE_INFO, ATTRIBUTE_KEYS, getCharacterClass, getCharacterLevel, xpToNextLevel } from '../lib/rpg';
+import { ATTRIBUTE_INFO, ATTRIBUTE_KEYS, getCharacterClass, getCharacterLevel, getTier, xpToNextLevel } from '../lib/rpg';
 import { isAtRisk, isDecaying } from '../lib/rpg';
 import { XpBar } from '../components/XpBar';
+import { Avatar } from '../components/Avatar';
 
 export function CharacterSheet() {
   const character = useStore((s) => s.character);
@@ -10,7 +11,11 @@ export function CharacterSheet() {
   const habits = useMemo(() => allHabits.filter((h) => !h.archived), [allHabits]);
 
   const level = useMemo(() => getCharacterLevel(character.attributes), [character.attributes]);
-  const { className } = useMemo(() => getCharacterClass(character.attributes), [character.attributes]);
+  const { attribute: dominantAttribute, className } = useMemo(
+    () => getCharacterClass(character.attributes),
+    [character.attributes],
+  );
+  const tier = useMemo(() => getTier(level), [level]);
 
   const totalXp = ATTRIBUTE_KEYS.reduce((sum, k) => sum + character.attributes[k].xp, 0);
   const avgProgressPct = useMemo(() => {
@@ -26,9 +31,12 @@ export function CharacterSheet() {
   return (
     <div className="flex flex-col gap-5 px-4 pb-28 pt-6">
       <div className="parchment-border rounded-2xl bg-ink-800/60 p-5 text-center">
-        <div className="mx-auto mb-3 flex h-20 w-20 items-center justify-center rounded-full border-2 border-gold-500/70 bg-gradient-to-b from-ink-700 to-ink-900 text-3xl shadow-inner">
-          🛡️
+        <div className="mb-3">
+          <Avatar attribute={dominantAttribute} level={level} size={84} />
         </div>
+        <p className="text-[10px] uppercase tracking-widest" style={{ color: tier.ring }}>
+          {tier.name} tier
+        </p>
         <h1 className="font-display text-xl font-bold text-gold-300">{character.name || 'Adventurer'}</h1>
         <p className="mt-1 text-sm text-gold-400/80">
           Level {level} {className}
@@ -37,6 +45,11 @@ export function CharacterSheet() {
           <XpBar level={level} xp={0} pct={avgProgressPct} color="var(--color-gold-500)" height={12} />
         </div>
         <p className="mt-2 text-xs text-white/50">{totalXp} total experience earned</p>
+        <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-ink-900/60 px-3 py-1 text-sm">
+          <span>🪙</span>
+          <span className="font-display font-semibold text-gold-300">{character.gold}</span>
+          <span className="text-xs text-white/40">gold</span>
+        </div>
       </div>
 
       {(decayingCount > 0 || atRiskCount > 0) && (

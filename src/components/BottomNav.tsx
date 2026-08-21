@@ -1,9 +1,10 @@
-export type Screen = 'character' | 'quests';
+export type Screen = 'character' | 'quests' | 'shop';
 
 export function BottomNav({ screen, onChange }: { screen: Screen; onChange: (s: Screen) => void }) {
   const items: { key: Screen; label: string; icon: string }[] = [
     { key: 'character', label: 'Character', icon: '🛡️' },
     { key: 'quests', label: 'Quests', icon: '📜' },
+    { key: 'shop', label: 'Shop', icon: '🏪' },
   ];
 
   return (

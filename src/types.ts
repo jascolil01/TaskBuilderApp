@@ -30,11 +30,28 @@ export interface CompletionEntry {
   habitId: string;
   date: string;
   xpAwarded: number;
+  goldAwarded: number;
 }
 
 export interface CharacterState {
   name: string;
   createdAt: string;
   attributes: Attributes;
+  gold: number;
   lastDecayCheck: string;
+}
+
+export interface Reward {
+  id: string;
+  name: string;
+  cost: number;
+  createdAt: string;
+}
+
+export interface RedemptionEntry {
+  id: string;
+  rewardId: string;
+  rewardName: string;
+  cost: number;
+  date: string;
 }

@@ -129,6 +129,20 @@ export function processHabitDecay(habit: Habit, today: string): DecayResult {
   };
 }
 
+export const GOLD_PER_XP = 1;
+
+export interface Tier {
+  name: string;
+  ring: string;
+}
+
+export function getTier(level: number): Tier {
+  if (level >= 20) return { name: 'Platinum', ring: '#d9ecff' };
+  if (level >= 10) return { name: 'Gold', ring: 'var(--color-gold-400)' };
+  if (level >= 5) return { name: 'Silver', ring: '#c7d0da' };
+  return { name: 'Bronze', ring: '#b08d57' };
+}
+
 export function isDecaying(habit: Habit): boolean {
   return !habit.archived && habit.missedSinceCompletion > habit.graceDays;
 }

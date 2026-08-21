@@ -1,8 +1,16 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { AttributeKey, CharacterState, CompletionEntry, Frequency, Habit } from './types';
+import type {
+  AttributeKey,
+  CharacterState,
+  CompletionEntry,
+  Frequency,
+  Habit,
+  RedemptionEntry,
+  Reward,
+} from './types';
 import { todayStr } from './lib/date';
-import { addXp, createAttributes, processHabitDecay, removeXp } from './lib/rpg';
+import { addXp, createAttributes, GOLD_PER_XP, processHabitDecay, removeXp } from './lib/rpg';
 
 function makeId(): string {
   return crypto.randomUUID();
@@ -38,10 +46,18 @@ function starterHabits(): Habit[] {
   ];
 }
 
+function starterRewards(): Reward[] {
+  const now = new Date().toISOString();
+  const base = (name: string, cost: number): Reward => ({ id: makeId(), name, cost, createdAt: now });
+  return [base('Guilt-free hour of gaming', 30), base('Order takeout', 60), base('New book or game', 200)];
+}
+
 interface Store {
   character: CharacterState;
   habits: Habit[];
   completions: CompletionEntry[];
+  rewards: Reward[];
+  redemptions: RedemptionEntry[];
 
   setCharacterName: (name: string) => void;
   runDecayCheck: () => void;
@@ -57,6 +73,11 @@ interface Store {
   deleteHabit: (id: string) => void;
   completeHabit: (id: string) => void;
   undoCompleteHabit: (id: string) => void;
+
+  addReward: (input: { name: string; cost: number }) => void;
+  updateReward: (id: string, patch: Partial<Pick<Reward, 'name' | 'cost'>>) => void;
+  deleteReward: (id: string) => void;
+  redeemReward: (id: string) => void;
 }
 
 export const useStore = create<Store>()(
@@ -66,10 +87,13 @@ export const useStore = create<Store>()(
         name: '',
         createdAt: new Date().toISOString(),
         attributes: createAttributes(),
+        gold: 0,
         lastDecayCheck: todayStr(),
       },
       habits: starterHabits(),
       completions: [],
+      rewards: starterRewards(),
+      redemptions: [],
 
       setCharacterName: (name) =>
         set((state) => ({ character: { ...state.character, name: name.trim().slice(0, 24) } })),
@@ -140,16 +164,19 @@ export const useStore = create<Store>()(
         if (!habit || habit.lastCompletedDate === today) return;
 
         const newStreak = habit.streak + 1;
+        const goldAwarded = habit.xpReward * GOLD_PER_XP;
         const entry: CompletionEntry = {
           id: makeId(),
           habitId: id,
           date: today,
           xpAwarded: habit.xpReward,
+          goldAwarded,
         };
 
         set((s) => ({
           character: {
             ...s.character,
+            gold: s.character.gold + goldAwarded,
             attributes: {
               ...s.character.attributes,
               [habit.attribute]: addXp(s.character.attributes[habit.attribute], habit.xpReward),
@@ -186,6 +213,7 @@ export const useStore = create<Store>()(
         set((s) => ({
           character: {
             ...s.character,
+            gold: todaysEntry ? Math.max(0, s.character.gold - todaysEntry.goldAwarded) : s.character.gold,
             attributes: todaysEntry
               ? {
                   ...s.character.attributes,
@@ -205,6 +233,48 @@ export const useStore = create<Store>()(
               : h,
           ),
           completions: remaining,
+        }));
+      },
+
+      addReward: (input) =>
+        set((state) => ({
+          rewards: [
+            ...state.rewards,
+            {
+              id: makeId(),
+              name: input.name.trim().slice(0, 60),
+              cost: Math.max(1, Math.round(input.cost)),
+              createdAt: new Date().toISOString(),
+            },
+          ],
+        })),
+
+      updateReward: (id, patch) =>
+        set((state) => ({
+          rewards: state.rewards.map((r) => (r.id === id ? { ...r, ...patch } : r)),
+        })),
+
+      deleteReward: (id) =>
+        set((state) => ({
+          rewards: state.rewards.filter((r) => r.id !== id),
+        })),
+
+      redeemReward: (id) => {
+        const state = get();
+        const reward = state.rewards.find((r) => r.id === id);
+        if (!reward || state.character.gold < reward.cost) return;
+
+        const entry: RedemptionEntry = {
+          id: makeId(),
+          rewardId: reward.id,
+          rewardName: reward.name,
+          cost: reward.cost,
+          date: todayStr(),
+        };
+
+        set((s) => ({
+          character: { ...s.character, gold: s.character.gold - reward.cost },
+          redemptions: [...s.redemptions, entry],
         }));
       },
     }),
