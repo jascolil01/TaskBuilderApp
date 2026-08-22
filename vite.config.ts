@@ -10,6 +10,9 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      // We register the worker ourselves in src/pwa.ts so we can reload the
+      // page when a new one takes control and re-check on resume.
+      injectRegister: null,
       includeAssets: ['icon.svg'],
       manifest: {
         name: 'Questlog: Habit RPG',
