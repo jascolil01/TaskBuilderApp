@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useStore } from '../store';
 import type { Reward } from '../types';
+import { REWARD_TIER_ORDER, REWARD_TIERS, type RewardTier } from '../lib/shop';
 
 export function AddEditReward({ reward, onClose }: { reward: Reward | null; onClose: () => void }) {
   const addReward = useStore((s) => s.addReward);
@@ -8,16 +9,16 @@ export function AddEditReward({ reward, onClose }: { reward: Reward | null; onCl
   const deleteReward = useStore((s) => s.deleteReward);
 
   const [name, setName] = useState(reward?.name ?? '');
-  const [cost, setCost] = useState(reward?.cost ?? 50);
+  const [tier, setTier] = useState<RewardTier>(reward?.tier ?? 'standard');
 
-  const canSave = name.trim().length > 0 && cost > 0;
+  const canSave = name.trim().length > 0;
 
   const handleSave = () => {
     if (!canSave) return;
     if (reward) {
-      updateReward(reward.id, { name, cost });
+      updateReward(reward.id, { name, tier });
     } else {
-      addReward({ name, cost });
+      addReward({ name, tier });
     }
     onClose();
   };
@@ -37,18 +38,37 @@ export function AddEditReward({ reward, onClose }: { reward: Reward | null; onCl
           className="mt-1.5 w-full rounded-lg border border-white/15 bg-ink-800 px-3 py-2.5 text-white outline-none focus:border-gold-500/70"
         />
 
-        <label className="mt-5 block text-xs uppercase tracking-wide text-white/50">
-          Cost: {cost} gold
-        </label>
-        <input
-          type="range"
-          min={10}
-          max={500}
-          step={10}
-          value={cost}
-          onChange={(e) => setCost(Number(e.target.value))}
-          className="mt-2 w-full accent-[var(--color-gold-500)]"
-        />
+        <label className="mt-5 block text-xs uppercase tracking-wide text-white/50">How big a reward is it?</label>
+        <p className="mt-0.5 text-[11px] text-white/30">
+          The price is set by the tier — pick honestly and it stays worth earning.
+        </p>
+        <div className="mt-2 flex flex-col gap-2">
+          {REWARD_TIER_ORDER.map((key) => {
+            const info = REWARD_TIERS[key];
+            const selected = tier === key;
+            return (
+              <button
+                key={key}
+                onClick={() => setTier(key)}
+                className={`rounded-lg border px-3 py-2.5 text-left transition-colors ${
+                  selected ? 'border-gold-500 bg-gold-500/15' : 'border-white/15'
+                }`}
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className={`font-display font-semibold ${selected ? 'text-gold-300' : 'text-white/70'}`}>
+                    {info.label}
+                  </span>
+                  <span className={`text-sm ${selected ? 'text-gold-300' : 'text-white/50'}`}>
+                    🪙 {info.cost}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[11px] text-white/35">
+                  {info.hint} · about {info.pace} to earn
+                </p>
+              </button>
+            );
+          })}
+        </div>
 
         <div className="mt-7 flex gap-2">
           <button

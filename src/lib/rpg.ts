@@ -143,11 +143,16 @@ export function processHabitDecay(habit: Habit, today: string, options: DecayOpt
   let streak = habit.streak;
   let xpLoss = 0;
 
+  let brokenStreak = habit.lastBrokenStreak;
   while (cursor < today) {
     // A forgiven day never counts as missed, so the streak survives it too.
     if (isScheduledDay(habit, cursor) && !forgiven.includes(cursor)) {
       missed += 1;
-      if (missed === 1) streak = 0;
+      if (missed === 1) {
+        // Remember how long it was, so a Phoenix Feather can put it back.
+        if (streak > 0) brokenStreak = streak;
+        streak = 0;
+      }
       if (missed > options.graceDays) {
         xpLoss += options.perMiss;
       }
@@ -160,6 +165,7 @@ export function processHabitDecay(habit: Habit, today: string, options: DecayOpt
       ...habit,
       missedSinceCompletion: missed,
       streak,
+      lastBrokenStreak: brokenStreak,
       decayedThroughDate: addDays(today, -1),
     },
     xpLoss,
@@ -210,6 +216,7 @@ export const DEEP_WORK_SPILL = 0.1;
 export const EQUANIMITY_DECAY_REDUCTION = 0.25;
 export const PATRON_GOLD_BONUS = 0.25;
 export const CHEAT_DAY_RECHARGE_COMPLETIONS = 30;
+export const ELIXIR_XP_MULTIPLIER = 2;
 
 export const PERKS: Record<AttributeKey, Perk[]> = {
   STR: [
@@ -336,6 +343,8 @@ export interface CompletionAward {
   /** XP spilled to every other attribute by Deep Work. */
   spilloverXp: number;
   doubled: boolean;
+  /** True when an Elixir of Might charge was consumed for this completion. */
+  elixirUsed: boolean;
 }
 
 /**
@@ -343,7 +352,12 @@ export interface CompletionAward {
  * `newStreak` is the streak the completion will produce (0 for an
  * off-schedule completion, which earns rewards but no streak credit).
  */
-export function getCompletionAward(habit: Habit, attributes: Attributes, newStreak: number): CompletionAward {
+export function getCompletionAward(
+  habit: Habit,
+  attributes: Attributes,
+  newStreak: number,
+  elixirActive = false,
+): CompletionAward {
   const bonuses = getAttributeBonuses(habit.attribute, attributes[habit.attribute].level);
   let xpMultiplier = bonuses.xpMultiplier;
   let doubled = false;
@@ -362,18 +376,23 @@ export function getCompletionAward(habit: Habit, attributes: Attributes, newStre
     xpMultiplier *= 1 + Math.min(MOMENTUM_CAP, Math.max(0, newStreak) * MOMENTUM_PER_STREAK_DAY);
   }
 
-  const xp = Math.max(1, Math.round(habit.xpReward * xpMultiplier));
+  const xpBeforeElixir = Math.max(1, Math.round(habit.xpReward * xpMultiplier));
 
+  // Gold is deliberately based on the pre-elixir figure. If an Elixir also
+  // doubled gold it could out-earn its own price, turning the shop into a
+  // money printer.
   let goldMultiplier = bonuses.goldMultiplier;
   if (hasSignature(attributes, 'patron')) goldMultiplier *= 1 + PATRON_GOLD_BONUS;
-  const gold = Math.max(0, Math.round(xp * GOLD_PER_XP * goldMultiplier));
+  const gold = Math.max(0, Math.round(xpBeforeElixir * GOLD_PER_XP * goldMultiplier));
+
+  const xp = elixirActive ? xpBeforeElixir * ELIXIR_XP_MULTIPLIER : xpBeforeElixir;
 
   const spilloverXp =
     habit.attribute === 'INT' && hasSignature(attributes, 'deep-work')
       ? Math.floor(xp * DEEP_WORK_SPILL)
       : 0;
 
-  return { xp, gold, spilloverXp, doubled };
+  return { xp, gold, spilloverXp, doubled, elixirUsed: elixirActive };
 }
 
 /**

@@ -1,3 +1,5 @@
+import type { RewardTier } from './lib/shop';
+
 export type AttributeKey = 'STR' | 'DEX' | 'CON' | 'INT' | 'WIS' | 'CHA';
 
 export interface AttributeState {
@@ -21,6 +23,8 @@ export interface Habit {
   lastCompletedDate: string | null;
   decayedThroughDate: string | null;
   missedSinceCompletion: number;
+  /** Length of the most recently broken streak, so a Phoenix Feather can restore it. */
+  lastBrokenStreak?: number;
   createdAt: string;
   archived: boolean;
 }
@@ -45,13 +49,32 @@ export interface CompletionEntry {
   date: string;
   xpAwarded: number;
   goldAwarded: number;
+  /** Set when an Elixir of Might charge paid for this completion, so undo can refund it. */
+  elixirUsed?: boolean;
   /** Absent on entries written before this was introduced. */
   prevProgress?: HabitProgressSnapshot;
 }
 
+/** Consumables bought from the shop. */
+export interface Inventory {
+  restDayTokens: number;
+  phoenixFeathers: number;
+  /** Completions still owed double XP by an Elixir of Might. */
+  elixirCompletions: number;
+}
+
+export interface Cosmetics {
+  unlockedTitles: string[];
+  unlockedRings: string[];
+  activeTitle: string | null;
+  /** Overrides the level-tier ring colour on the avatar when set. */
+  activeRing: string | null;
+}
+
 /**
- * Constitution's signature perk. Charges are spent to forgive a day of
- * Constitution quests, and re-earned through consistency rather than time.
+ * Constitution's signature perk. A charge is spent to forgive a full day —
+ * every quest due that day — and is re-earned through consistency rather
+ * than elapsed time.
  */
 export interface CheatDayState {
   /** Set once Constitution first reaches the signature level. */
@@ -59,7 +82,7 @@ export interface CheatDayState {
   charges: number;
   /** Completions logged since the last charge was spent. */
   progressToNext: number;
-  /** Days already forgiven — decay skips Constitution quests on these. */
+  /** Days already forgiven — decay skips every quest on these. */
   usedDates: string[];
 }
 
@@ -76,6 +99,8 @@ export interface CharacterState {
    */
   lifetimeXp: number;
   cheatDay: CheatDayState;
+  inventory: Inventory;
+  cosmetics: Cosmetics;
   lastDecayCheck: string;
 }
 
@@ -88,7 +113,12 @@ export interface BossWeek {
 export interface Reward {
   id: string;
   name: string;
-  cost: number;
+  /**
+   * Price comes from the tier, not from the player. A free-form cost field
+   * let you quietly discount your own rewards, which defeats the point of
+   * earning them.
+   */
+  tier: RewardTier;
   createdAt: string;
 }
 

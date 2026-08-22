@@ -7,6 +7,7 @@ import { XpBar } from '../components/XpBar';
 import { Avatar } from '../components/Avatar';
 import { BossBattleCard } from '../components/BossBattleCard';
 import { CheatDayCard } from '../components/CheatDayCard';
+import { COSMETIC_RINGS, COSMETIC_TITLES } from '../lib/shop';
 
 // Three.js is a heavy dependency (~500KB) — load it only when this screen
 // actually renders the 3D widget, not as part of the app's initial bundle.
@@ -30,6 +31,14 @@ export function CharacterSheet() {
     [character.attributes],
   );
   const tier = useMemo(() => getTier(level), [level]);
+  const equippedTitle = useMemo(
+    () => COSMETIC_TITLES.find((t) => t.id === character.cosmetics.activeTitle)?.label ?? null,
+    [character.cosmetics.activeTitle],
+  );
+  const equippedRing = useMemo(
+    () => COSMETIC_RINGS.find((r) => r.id === character.cosmetics.activeRing)?.color,
+    [character.cosmetics.activeRing],
+  );
 
   // Lifetime XP is a monotonic counter on the character rather than a sum
   // over completions, so deleting a quest can't retroactively demote you.
@@ -77,12 +86,15 @@ export function CharacterSheet() {
 
       <div className="parchment-border -mt-3 rounded-2xl bg-ink-800/60 p-5 text-center">
         <div className="mb-3">
-          <Avatar attribute={dominantAttribute} level={level} size={84} />
+          <Avatar attribute={dominantAttribute} level={level} size={84} ringColor={equippedRing} />
         </div>
         <p className="text-[10px] uppercase tracking-widest" style={{ color: tier.ring }}>
           {tier.name} tier
         </p>
-        <h1 className="font-display text-xl font-bold text-gold-300">{character.name || 'Adventurer'}</h1>
+        <h1 className="font-display text-xl font-bold text-gold-300">
+          {character.name || 'Adventurer'}
+          {equippedTitle && <span className="text-gold-400/80">, {equippedTitle}</span>}
+        </h1>
         <p className="mt-1 text-sm text-gold-400/80">
           Level {level} {className}
         </p>

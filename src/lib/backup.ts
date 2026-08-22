@@ -4,6 +4,8 @@ import type {
   BossVictory,
   CharacterState,
   CheatDayState,
+  Cosmetics,
+  Inventory,
   CompletionEntry,
   Habit,
   RedemptionEntry,
@@ -11,6 +13,13 @@ import type {
   Reward,
 } from '../types';
 import { ATTRIBUTE_KEYS, SIGNATURE_LEVEL } from './rpg';
+import {
+  COSMETIC_RINGS,
+  COSMETIC_TITLES,
+  inferRewardTier,
+  REWARD_TIER_ORDER,
+  type RewardTier,
+} from './shop';
 import { todayStr } from './date';
 
 export interface BackupData {
@@ -68,6 +77,38 @@ function parseCheatDay(raw: unknown, conLevel: number): CheatDayState {
   };
 }
 
+function parseInventory(raw: unknown): Inventory {
+  if (!isObj(raw)) return { restDayTokens: 0, phoenixFeathers: 0, elixirCompletions: 0 };
+  return {
+    restDayTokens: Math.max(0, Math.floor(finiteNum(raw.restDayTokens, 0))),
+    phoenixFeathers: Math.max(0, Math.floor(finiteNum(raw.phoenixFeathers, 0))),
+    elixirCompletions: Math.max(0, Math.floor(finiteNum(raw.elixirCompletions, 0))),
+  };
+}
+
+function parseCosmetics(raw: unknown): Cosmetics {
+  const empty: Cosmetics = { unlockedTitles: [], unlockedRings: [], activeTitle: null, activeRing: null };
+  if (!isObj(raw)) return empty;
+  // Only ids that exist in the current catalog survive, so a hand-edited
+  // backup can't inject an unknown title or ring.
+  const titleIds = new Set(COSMETIC_TITLES.map((c) => c.id));
+  const ringIds = new Set(COSMETIC_RINGS.map((c) => c.id));
+  const known = (v: unknown, valid: Set<string>) =>
+    Array.isArray(v) ? v.filter((id): id is string => typeof id === 'string' && valid.has(id)) : [];
+
+  const unlockedTitles = known(raw.unlockedTitles, titleIds);
+  const unlockedRings = known(raw.unlockedRings, ringIds);
+  const active = (v: unknown, owned: string[]) =>
+    typeof v === 'string' && owned.includes(v) ? v : null;
+
+  return {
+    unlockedTitles,
+    unlockedRings,
+    activeTitle: active(raw.activeTitle, unlockedTitles),
+    activeRing: active(raw.activeRing, unlockedRings),
+  };
+}
+
 function parseCharacter(raw: unknown, completions: unknown): CharacterState | null {
   if (!isObj(raw)) return null;
   const attributes = parseAttributes(raw.attributes);
@@ -93,6 +134,8 @@ function parseCharacter(raw: unknown, completions: unknown): CharacterState | nu
     streakSaves: Math.max(0, Math.floor(finiteNum(raw.streakSaves, 0))),
     lifetimeXp,
     cheatDay: parseCheatDay(raw.cheatDay, attributes.CON.level),
+    inventory: parseInventory(raw.inventory),
+    cosmetics: parseCosmetics(raw.cosmetics),
     lastDecayCheck: typeof raw.lastDecayCheck === 'string' ? raw.lastDecayCheck : todayStr(),
   };
 }
@@ -160,10 +203,16 @@ function parseCompletion(raw: unknown): CompletionEntry | null {
 function parseReward(raw: unknown): Reward | null {
   if (!isObj(raw)) return null;
   if (typeof raw.id !== 'string' || typeof raw.name !== 'string') return null;
+  // Backups written before tiered pricing carry a free-form cost; map it onto
+  // the closest tier rather than trusting a number the player could have set.
+  const tier: RewardTier =
+    typeof raw.tier === 'string' && REWARD_TIER_ORDER.includes(raw.tier as RewardTier)
+      ? (raw.tier as RewardTier)
+      : inferRewardTier(finiteNum(raw.cost, 0));
   return {
     id: raw.id,
     name: raw.name.slice(0, 60),
-    cost: Math.max(1, Math.floor(finiteNum(raw.cost, 10))),
+    tier,
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
   };
 }

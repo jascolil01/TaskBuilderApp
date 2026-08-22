@@ -9,6 +9,7 @@ import type {
   CompletionEntry,
   Frequency,
   Habit,
+  Inventory,
   RedemptionEntry,
   ReminderSettings,
   Reward,
@@ -30,9 +31,19 @@ import {
   processHabitDecay,
   removeXp,
   SIGNATURE_LEVEL,
-  STREAK_SAVE_COST,
 } from './lib/rpg';
 import { getBossForWeek, getBossGoldReward, getBossThreshold, getWeeklyXpEarned, getWeekStart } from './lib/boss';
+import {
+  COSMETIC_COST,
+  COSMETIC_RINGS,
+  COSMETIC_TITLES,
+  ELIXIR_COMPLETIONS,
+  getRewardCost,
+  getShopItem,
+  inferRewardTier,
+  type RewardTier,
+  type ShopItemId,
+} from './lib/shop';
 import { parseBackup } from './lib/backup';
 import { useToastStore } from './toastStore';
 
@@ -72,9 +83,15 @@ function starterHabits(): Habit[] {
 
 function starterRewards(): Reward[] {
   const now = new Date().toISOString();
-  const base = (name: string, cost: number): Reward => ({ id: makeId(), name, cost, createdAt: now });
-  return [base('Guilt-free hour of gaming', 30), base('Order takeout', 60), base('New book or game', 200)];
+  const base = (name: string, tier: RewardTier): Reward => ({ id: makeId(), name, tier, createdAt: now });
+  return [
+    base('Guilt-free hour of gaming', 'minor'),
+    base('Order takeout', 'standard'),
+    base('New book or game', 'major'),
+  ];
 }
+
+const EMPTY_INVENTORY: Inventory = { restDayTokens: 0, phoenixFeathers: 0, elixirCompletions: 0 };
 
 interface Store {
   character: CharacterState;
@@ -104,11 +121,15 @@ interface Store {
   completeHabit: (id: string) => void;
   undoCompleteHabit: (id: string) => void;
 
-  addReward: (input: { name: string; cost: number }) => void;
-  updateReward: (id: string, patch: Partial<Pick<Reward, 'name' | 'cost'>>) => void;
+  addReward: (input: { name: string; tier: RewardTier }) => void;
+  updateReward: (id: string, patch: Partial<Pick<Reward, 'name' | 'tier'>>) => void;
   deleteReward: (id: string) => void;
   redeemReward: (id: string) => void;
-  buyStreakSave: () => void;
+  buyShopItem: (id: ShopItemId) => void;
+  spendRestDay: () => void;
+  restoreStreakWithFeather: (habitId: string) => void;
+  buyCosmetic: (kind: 'title' | 'ring', id: string) => void;
+  setCosmetic: (kind: 'title' | 'ring', id: string | null) => void;
   claimBossVictory: () => void;
 
   resetAll: () => void;
@@ -126,6 +147,13 @@ function createInitialState() {
       streakSaves: 0,
       lifetimeXp: 0,
       cheatDay: { unlocked: false, charges: 0, progressToNext: 0, usedDates: [] as string[] },
+      inventory: { ...EMPTY_INVENTORY },
+      cosmetics: {
+        unlockedTitles: [] as string[],
+        unlockedRings: [] as string[],
+        activeTitle: null as string | null,
+        activeRing: null as string | null,
+      },
       lastDecayCheck: todayStr(),
     },
     habits: starterHabits(),
@@ -300,13 +328,20 @@ export const useStore = create<Store>()(
         const onSchedule = isScheduledDay(habit, today);
         const newStreak = onSchedule ? habit.streak + 1 : habit.streak;
 
-        const award = getCompletionAward(habit, state.character.attributes, onSchedule ? newStreak : 0);
+        const elixirActive = state.character.inventory.elixirCompletions > 0;
+        const award = getCompletionAward(
+          habit,
+          state.character.attributes,
+          onSchedule ? newStreak : 0,
+          elixirActive,
+        );
         const entry: CompletionEntry = {
           id: makeId(),
           habitId: id,
           date: today,
           xpAwarded: award.xp,
           goldAwarded: award.gold,
+          elixirUsed: award.elixirUsed || undefined,
           prevProgress: {
             streak: habit.streak,
             bestStreak: habit.bestStreak,
@@ -327,6 +362,11 @@ export const useStore = create<Store>()(
           useToastStore.getState().show(`⭐ ${habit.attribute} leveled up to ${newAttrState.level}!`);
         } else if (award.doubled) {
           useToastStore.getState().show(`⚔️ Berserker! ${newStreak}-day streak paid double XP.`);
+        } else if (award.elixirUsed) {
+          const left = state.character.inventory.elixirCompletions - 1;
+          useToastStore
+            .getState()
+            .show(`⚗️ Elixir of Might — double XP. ${left} ${left === 1 ? 'use' : 'uses'} left.`);
         }
 
         set((s) => {
@@ -350,6 +390,12 @@ export const useStore = create<Store>()(
             gold: s.character.gold + award.gold,
             lifetimeXp: s.character.lifetimeXp + award.xp + spilled,
             attributes,
+            inventory: award.elixirUsed
+              ? {
+                  ...s.character.inventory,
+                  elixirCompletions: Math.max(0, s.character.inventory.elixirCompletions - 1),
+                }
+              : s.character.inventory,
           };
           character = withCheatDayUnlock(character);
           character = advanceCheatDayRecharge(character);
@@ -439,6 +485,13 @@ export const useStore = create<Store>()(
               gold: s.character.gold - todaysEntry.goldAwarded,
               lifetimeXp: Math.max(0, s.character.lifetimeXp - todaysEntry.xpAwarded - spilled),
               attributes,
+              // Give the Elixir charge back if this completion consumed one.
+              inventory: todaysEntry.elixirUsed
+                ? {
+                    ...s.character.inventory,
+                    elixirCompletions: s.character.inventory.elixirCompletions + 1,
+                  }
+                : s.character.inventory,
             },
             habits: s.habits.map((h) => (h.id === id ? { ...h, ...restored } : h)),
             completions: remaining,
@@ -453,7 +506,7 @@ export const useStore = create<Store>()(
             {
               id: makeId(),
               name: input.name.trim().slice(0, 60),
-              cost: Math.max(1, Math.round(input.cost)),
+              tier: input.tier,
               createdAt: new Date().toISOString(),
             },
           ],
@@ -472,45 +525,173 @@ export const useStore = create<Store>()(
       redeemReward: (id) => {
         const state = get();
         const reward = state.rewards.find((r) => r.id === id);
-        if (!reward || state.character.gold < reward.cost) return;
+        if (!reward) return;
+        const cost = getRewardCost(reward.tier);
+        if (state.character.gold < cost) return;
 
         const entry: RedemptionEntry = {
           id: makeId(),
           rewardId: reward.id,
           rewardName: reward.name,
-          cost: reward.cost,
+          cost,
           date: todayStr(),
           kind: 'reward',
         };
 
         set((s) => ({
-          character: { ...s.character, gold: s.character.gold - reward.cost },
+          character: { ...s.character, gold: s.character.gold - cost },
           redemptions: [...s.redemptions, entry],
         }));
       },
 
-      buyStreakSave: () => {
+      buyShopItem: (itemId) => {
         const state = get();
-        if (state.character.gold < STREAK_SAVE_COST) return;
+        const item = getShopItem(itemId);
+        if (state.character.gold < item.cost) return;
 
         const entry: RedemptionEntry = {
           id: makeId(),
-          rewardId: 'streak-save',
-          rewardName: 'Streak Save Charge',
-          cost: STREAK_SAVE_COST,
+          rewardId: item.id,
+          rewardName: item.name,
+          cost: item.cost,
           date: todayStr(),
           kind: 'utility',
         };
 
+        set((s) => {
+          const character: CharacterState = { ...s.character, gold: s.character.gold - item.cost };
+          const inventory = { ...character.inventory };
+          switch (item.id) {
+            case 'streak-save':
+              character.streakSaves = character.streakSaves + 1;
+              break;
+            case 'elixir-of-might':
+              inventory.elixirCompletions += ELIXIR_COMPLETIONS;
+              break;
+            case 'rest-day-token':
+              inventory.restDayTokens += 1;
+              break;
+            case 'phoenix-feather':
+              inventory.phoenixFeathers += 1;
+              break;
+          }
+          character.inventory = inventory;
+          return { character, redemptions: [...s.redemptions, entry] };
+        });
+        useToastStore.getState().show(`${item.icon} ${item.name} purchased.`);
+      },
+
+      spendRestDay: () => {
+        const state = get();
+        const today = todayStr();
+        if (state.character.inventory.restDayTokens < 1) return;
+        // Already a rest day, whether from a token or the Cheat Day perk.
+        if (state.character.cheatDay.usedDates.includes(today)) return;
+
+        useToastStore.getState().show('🌙 Rest Day claimed — every quest is forgiven today.');
         set((s) => ({
           character: {
             ...s.character,
-            gold: s.character.gold - STREAK_SAVE_COST,
-            streakSaves: s.character.streakSaves + 1,
+            inventory: { ...s.character.inventory, restDayTokens: s.character.inventory.restDayTokens - 1 },
+            cheatDay: {
+              ...s.character.cheatDay,
+              usedDates: [...s.character.cheatDay.usedDates, today],
+            },
+          },
+        }));
+      },
+
+      restoreStreakWithFeather: (habitId) => {
+        const state = get();
+        if (state.character.inventory.phoenixFeathers < 1) return;
+        const habit = state.habits.find((h) => h.id === habitId);
+        const restored = habit?.lastBrokenStreak ?? 0;
+        if (!habit || restored <= 0) return;
+
+        useToastStore.getState().show(`🪶 ${habit.name} restored to a ${restored}-day streak.`);
+        set((s) => ({
+          character: {
+            ...s.character,
+            inventory: { ...s.character.inventory, phoenixFeathers: s.character.inventory.phoenixFeathers - 1 },
+          },
+          habits: s.habits.map((h) =>
+            h.id === habitId
+              ? {
+                  ...h,
+                  streak: restored,
+                  bestStreak: Math.max(h.bestStreak, restored),
+                  // A restored streak implies the gap is forgiven, so decay
+                  // stops too — otherwise the streak would break again at once.
+                  missedSinceCompletion: 0,
+                  lastBrokenStreak: undefined,
+                }
+              : h,
+          ),
+        }));
+      },
+
+      buyCosmetic: (kind, cosmeticId) => {
+        const state = get();
+        const catalog = kind === 'title' ? COSMETIC_TITLES : COSMETIC_RINGS;
+        if (!catalog.some((c) => c.id === cosmeticId)) return;
+        const owned =
+          kind === 'title'
+            ? state.character.cosmetics.unlockedTitles
+            : state.character.cosmetics.unlockedRings;
+        if (owned.includes(cosmeticId)) return;
+        if (state.character.gold < COSMETIC_COST) return;
+
+        const label =
+          kind === 'title'
+            ? COSMETIC_TITLES.find((c) => c.id === cosmeticId)!.label
+            : COSMETIC_RINGS.find((c) => c.id === cosmeticId)!.label;
+
+        const entry: RedemptionEntry = {
+          id: makeId(),
+          rewardId: `cosmetic-${kind}-${cosmeticId}`,
+          rewardName: `${label} (${kind})`,
+          cost: COSMETIC_COST,
+          date: todayStr(),
+          kind: 'utility',
+        };
+
+        useToastStore.getState().show(`✨ Unlocked ${label}.`);
+        set((s) => ({
+          character: {
+            ...s.character,
+            gold: s.character.gold - COSMETIC_COST,
+            cosmetics: {
+              ...s.character.cosmetics,
+              ...(kind === 'title'
+                ? {
+                    unlockedTitles: [...s.character.cosmetics.unlockedTitles, cosmeticId],
+                    activeTitle: s.character.cosmetics.activeTitle ?? cosmeticId,
+                  }
+                : {
+                    unlockedRings: [...s.character.cosmetics.unlockedRings, cosmeticId],
+                    activeRing: s.character.cosmetics.activeRing ?? cosmeticId,
+                  }),
+            },
           },
           redemptions: [...s.redemptions, entry],
         }));
       },
+
+      setCosmetic: (kind, cosmeticId) =>
+        set((s) => {
+          const owned =
+            kind === 'title' ? s.character.cosmetics.unlockedTitles : s.character.cosmetics.unlockedRings;
+          if (cosmeticId !== null && !owned.includes(cosmeticId)) return s;
+          return {
+            character: {
+              ...s.character,
+              cosmetics: {
+                ...s.character.cosmetics,
+                ...(kind === 'title' ? { activeTitle: cosmeticId } : { activeRing: cosmeticId }),
+              },
+            },
+          };
+        }),
 
       claimBossVictory: () => {
         const state = get();
@@ -552,7 +733,7 @@ export const useStore = create<Store>()(
         const { character, habits, completions, rewards, redemptions, bossVictories, bossWeek, settings } = get();
         return JSON.stringify(
           {
-            version: 2,
+            version: 3,
             exportedAt: new Date().toISOString(),
             character,
             habits,
@@ -588,10 +769,10 @@ export const useStore = create<Store>()(
     }),
     {
       name: 'questlog-rpg-storage',
-      version: 2,
+      version: 3,
       migrate: (persisted, fromVersion) => {
         const state = persisted as Partial<Store> & { character?: Partial<CharacterState> };
-        if (fromVersion >= 2 || !state?.character) return state as Store;
+        if (fromVersion >= 3 || !state?.character) return state as Store;
 
         // v1 had no lifetimeXp and no cheat-day state. Seed lifetime XP from
         // the completion log so existing players keep the progress they
@@ -612,7 +793,25 @@ export const useStore = create<Store>()(
               progressToNext: 0,
               usedDates: [],
             },
+            // v3: shop consumables and cosmetics.
+            inventory: character.inventory ?? { ...EMPTY_INVENTORY },
+            cosmetics: character.cosmetics ?? {
+              unlockedTitles: [],
+              unlockedRings: [],
+              activeTitle: null,
+              activeRing: null,
+            },
           },
+          // v3: reward prices moved from a free-form number to fixed tiers.
+          rewards: (Array.isArray(state.rewards) ? state.rewards : []).map((r) => {
+            const legacy = r as Reward & { cost?: number };
+            return {
+              id: legacy.id,
+              name: legacy.name,
+              tier: legacy.tier ?? inferRewardTier(legacy.cost ?? 0),
+              createdAt: legacy.createdAt,
+            };
+          }),
           bossWeek: null,
         } as Store;
       },
