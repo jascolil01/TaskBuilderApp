@@ -3,6 +3,7 @@ import { useStore } from '../store';
 import type { Habit } from '../types';
 import { HabitCard } from '../components/HabitCard';
 import { todayStr } from '../lib/date';
+import { getIncompleteTodayCount } from '../lib/reminders';
 import { AddEditHabit } from './AddEditHabit';
 
 export function QuestLog() {
@@ -12,6 +13,7 @@ export function QuestLog() {
   const active = habits.filter((h) => !h.archived);
   const archived = habits.filter((h) => h.archived);
   const today = todayStr();
+  const incompleteCount = useMemo(() => getIncompleteTodayCount(active), [active]);
 
   const sorted = useMemo(
     () =>
@@ -35,6 +37,12 @@ export function QuestLog() {
           + New Quest
         </button>
       </div>
+
+      {incompleteCount > 0 && (
+        <div className="rounded-xl border border-gold-500/40 bg-gold-500/10 px-4 py-2.5 text-sm text-gold-300">
+          🔔 {incompleteCount} quest{incompleteCount > 1 ? 's' : ''} left today
+        </div>
+      )}
 
       {sorted.length === 0 ? (
         <div className="parchment-border mt-4 rounded-2xl bg-ink-800/50 p-6 text-center text-white/60">

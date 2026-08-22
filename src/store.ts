@@ -2,15 +2,27 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type {
   AttributeKey,
+  BossVictory,
   CharacterState,
   CompletionEntry,
   Frequency,
   Habit,
   RedemptionEntry,
+  ReminderSettings,
   Reward,
 } from './types';
 import { todayStr } from './lib/date';
-import { addXp, createAttributes, getCrossedPerks, GOLD_PER_XP, processHabitDecay, removeXp } from './lib/rpg';
+import {
+  addXp,
+  createAttributes,
+  getCrossedPerks,
+  GOLD_PER_XP,
+  isDecaying,
+  processHabitDecay,
+  removeXp,
+  STREAK_SAVE_COST,
+} from './lib/rpg';
+import { getBossForWeek, getBossGoldReward, getBossThreshold, getWeeklyXpEarned, getWeekStart } from './lib/boss';
 import { useToastStore } from './toastStore';
 
 function makeId(): string {
@@ -59,8 +71,12 @@ interface Store {
   completions: CompletionEntry[];
   rewards: Reward[];
   redemptions: RedemptionEntry[];
+  bossVictories: BossVictory[];
+  settings: ReminderSettings;
 
   setCharacterName: (name: string) => void;
+  setReminderSettings: (patch: Partial<Pick<ReminderSettings, 'enabled' | 'time'>>) => void;
+  markReminderNotified: (date: string) => void;
   runDecayCheck: () => void;
   addHabit: (input: {
     name: string;
@@ -79,8 +95,12 @@ interface Store {
   updateReward: (id: string, patch: Partial<Pick<Reward, 'name' | 'cost'>>) => void;
   deleteReward: (id: string) => void;
   redeemReward: (id: string) => void;
+  buyStreakSave: () => void;
+  claimBossVictory: () => void;
 
   resetAll: () => void;
+  exportData: () => string;
+  importData: (json: string) => { ok: boolean; error?: string };
 }
 
 function createInitialState() {
@@ -90,12 +110,14 @@ function createInitialState() {
       createdAt: new Date().toISOString(),
       attributes: createAttributes(),
       gold: 0,
+      streakSaves: 0,
       lastDecayCheck: todayStr(),
     },
     habits: starterHabits(),
     completions: [] as CompletionEntry[],
     rewards: starterRewards(),
     redemptions: [] as RedemptionEntry[],
+    bossVictories: [] as BossVictory[],
   };
 }
 
@@ -103,18 +125,34 @@ export const useStore = create<Store>()(
   persist(
     (set, get) => ({
       ...createInitialState(),
+      // Device-level preference, not game progress — deliberately outside
+      // createInitialState() so resetAll() never touches it.
+      settings: { enabled: false, time: '19:00', lastNotifiedDate: null } as ReminderSettings,
 
       setCharacterName: (name) =>
         set((state) => ({ character: { ...state.character, name: name.trim().slice(0, 24) } })),
+
+      setReminderSettings: (patch) => set((state) => ({ settings: { ...state.settings, ...patch } })),
+
+      markReminderNotified: (date) => set((state) => ({ settings: { ...state.settings, lastNotifiedDate: date } })),
 
       runDecayCheck: () =>
         set((state) => {
           const today = todayStr();
           let attributes = { ...state.character.attributes };
+          let streakSaves = state.character.streakSaves;
           let changed = false;
           const habits = state.habits.map((h) => {
+            const wasDecaying = isDecaying(h);
             const { habit: updated, xpLoss } = processHabitDecay(h, today);
             if (xpLoss > 0) {
+              const firstCrossing = !wasDecaying && isDecaying(updated);
+              if (firstCrossing && streakSaves > 0) {
+                streakSaves -= 1;
+                changed = true;
+                useToastStore.getState().show(`🛡️ Streak Save used to protect ${h.name} — ${streakSaves} left`);
+                return { ...updated, missedSinceCompletion: 0 };
+              }
               attributes = { ...attributes, [h.attribute]: removeXp(attributes[h.attribute], xpLoss) };
               changed = true;
             }
@@ -124,7 +162,7 @@ export const useStore = create<Store>()(
           if (!changed && state.character.lastDecayCheck === today) return state;
           return {
             habits,
-            character: { ...state.character, attributes, lastDecayCheck: today },
+            character: { ...state.character, attributes, streakSaves, lastDecayCheck: today },
           };
         }),
 
@@ -188,6 +226,8 @@ export const useStore = create<Store>()(
         if (crossedPerks.length > 0) {
           const perk = crossedPerks[crossedPerks.length - 1];
           useToastStore.getState().show(`🎉 Perk unlocked: ${perk.name} (${habit.attribute} Lv ${perk.level})`);
+        } else if (newAttrState.level > oldLevel) {
+          useToastStore.getState().show(`⭐ ${habit.attribute} leveled up to ${newAttrState.level}!`);
         }
 
         set((s) => ({
@@ -295,7 +335,115 @@ export const useStore = create<Store>()(
         }));
       },
 
+      buyStreakSave: () => {
+        const state = get();
+        if (state.character.gold < STREAK_SAVE_COST) return;
+
+        const entry: RedemptionEntry = {
+          id: makeId(),
+          rewardId: 'streak-save',
+          rewardName: 'Streak Save Charge',
+          cost: STREAK_SAVE_COST,
+          date: todayStr(),
+        };
+
+        set((s) => ({
+          character: {
+            ...s.character,
+            gold: s.character.gold - STREAK_SAVE_COST,
+            streakSaves: s.character.streakSaves + 1,
+          },
+          redemptions: [...s.redemptions, entry],
+        }));
+      },
+
+      claimBossVictory: () => {
+        const state = get();
+        const today = todayStr();
+        const weekStart = getWeekStart(today);
+        if (state.bossVictories.some((v) => v.weekStart === weekStart)) return;
+
+        const activeHabits = state.habits.filter((h) => !h.archived);
+        const threshold = getBossThreshold(activeHabits);
+        const xpEarned = getWeeklyXpEarned(state.completions, weekStart);
+        if (xpEarned < threshold) return;
+
+        const boss = getBossForWeek(weekStart);
+        const goldReward = getBossGoldReward(threshold);
+        const victory: BossVictory = {
+          id: makeId(),
+          weekStart,
+          bossName: boss.name,
+          xpEarned,
+          threshold,
+          goldReward,
+          defeatedAt: new Date().toISOString(),
+        };
+
+        useToastStore.getState().show(`⚔️ ${boss.name} defeated! +${goldReward} gold`);
+        set((s) => ({
+          character: { ...s.character, gold: s.character.gold + goldReward },
+          bossVictories: [...s.bossVictories, victory],
+        }));
+      },
+
       resetAll: () => set(createInitialState()),
+
+      exportData: () => {
+        const { character, habits, completions, rewards, redemptions, bossVictories, settings } = get();
+        return JSON.stringify(
+          {
+            version: 1,
+            exportedAt: new Date().toISOString(),
+            character,
+            habits,
+            completions,
+            rewards,
+            redemptions,
+            bossVictories,
+            settings,
+          },
+          null,
+          2,
+        );
+      },
+
+      importData: (json) => {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(json);
+        } catch {
+          return { ok: false, error: "Could not read this file — it isn't valid JSON." };
+        }
+        if (
+          !parsed ||
+          typeof parsed !== 'object' ||
+          !('character' in parsed) ||
+          !('habits' in parsed) ||
+          !Array.isArray((parsed as { habits: unknown }).habits)
+        ) {
+          return { ok: false, error: "This file doesn't look like a Questlog backup." };
+        }
+        const data = parsed as {
+          character: CharacterState;
+          habits: Habit[];
+          completions?: CompletionEntry[];
+          rewards?: Reward[];
+          redemptions?: RedemptionEntry[];
+          bossVictories?: BossVictory[];
+          settings?: ReminderSettings;
+        };
+        set({
+          character: data.character,
+          habits: data.habits,
+          completions: Array.isArray(data.completions) ? data.completions : [],
+          rewards: Array.isArray(data.rewards) ? data.rewards : starterRewards(),
+          redemptions: Array.isArray(data.redemptions) ? data.redemptions : [],
+          bossVictories: Array.isArray(data.bossVictories) ? data.bossVictories : [],
+          ...(data.settings ? { settings: data.settings } : {}),
+        });
+        return { ok: true };
+      },
     }),
     { name: 'questlog-rpg-storage' },
   ),

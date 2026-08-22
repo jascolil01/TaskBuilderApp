@@ -4,8 +4,10 @@ import { BottomNav, type Screen } from './components/BottomNav';
 import { CharacterSheet } from './screens/CharacterSheet';
 import { QuestLog } from './screens/QuestLog';
 import { Shop } from './screens/Shop';
+import { Chronicle } from './screens/Chronicle';
 import { Onboarding } from './screens/Onboarding';
 import { Toast } from './components/Toast';
+import { ReminderScheduler } from './components/ReminderScheduler';
 
 function App() {
   const characterName = useStore((s) => s.character.name);
@@ -40,8 +42,10 @@ function App() {
       {screen === 'character' && <CharacterSheet />}
       {screen === 'quests' && <QuestLog />}
       {screen === 'shop' && <Shop />}
+      {screen === 'chronicle' && <Chronicle />}
       <BottomNav screen={screen} onChange={setScreen} />
       <Toast />
+      <ReminderScheduler />
     </>
   );
 }

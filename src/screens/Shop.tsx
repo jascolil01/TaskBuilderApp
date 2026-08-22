@@ -1,14 +1,18 @@
 import { useState } from 'react';
 import { useStore } from '../store';
 import type { Reward } from '../types';
+import { STREAK_SAVE_COST } from '../lib/rpg';
 import { AddEditReward } from './AddEditReward';
 
 export function Shop() {
   const gold = useStore((s) => s.character.gold);
+  const streakSaves = useStore((s) => s.character.streakSaves);
   const rewards = useStore((s) => s.rewards);
   const redemptions = useStore((s) => s.redemptions);
   const redeemReward = useStore((s) => s.redeemReward);
+  const buyStreakSave = useStore((s) => s.buyStreakSave);
   const [editing, setEditing] = useState<Reward | 'new' | null>(null);
+  const canAffordStreakSave = gold >= STREAK_SAVE_COST;
 
   const sorted = [...rewards].sort((a, b) => a.cost - b.cost);
   const recentRedemptions = [...redemptions].reverse().slice(0, 5);
@@ -29,6 +33,25 @@ export function Shop() {
         <span className="text-xl">🪙</span>
         <span className="font-display text-lg font-bold text-gold-300">{gold}</span>
         <span className="text-sm text-white/50">gold</span>
+      </div>
+
+      <div className="parchment-border flex items-center gap-3 rounded-xl bg-ink-800/50 p-3.5">
+        <span className="text-2xl">🛡️</span>
+        <div className="min-w-0 flex-1">
+          <p className="font-medium text-white/90">Streak Save</p>
+          <p className="mt-0.5 text-xs text-white/40">
+            Auto-protects the next quest that would start decaying. You own {streakSaves}.
+          </p>
+        </div>
+        <button
+          onClick={buyStreakSave}
+          disabled={!canAffordStreakSave}
+          className={`shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition-all active:scale-95 ${
+            canAffordStreakSave ? 'bg-gold-500 text-ink-950' : 'cursor-not-allowed bg-white/5 text-white/30'
+          }`}
+        >
+          🪙{STREAK_SAVE_COST}
+        </button>
       </div>
 
       {sorted.length === 0 ? (

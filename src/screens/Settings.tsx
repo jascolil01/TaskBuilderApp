@@ -1,8 +1,63 @@
+import { useRef, useState } from 'react';
 import { useStore } from '../store';
 
 export function Settings({ onClose }: { onClose: () => void }) {
   const characterName = useStore((s) => s.character.name);
   const resetAll = useStore((s) => s.resetAll);
+  const settings = useStore((s) => s.settings);
+  const setReminderSettings = useStore((s) => s.setReminderSettings);
+  const exportData = useStore((s) => s.exportData);
+  const importData = useStore((s) => s.importData);
+  const [permissionDenied, setPermissionDenied] = useState(false);
+  const [importMessage, setImportMessage] = useState<{ text: string; error: boolean } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const notificationsSupported = typeof Notification !== 'undefined';
+
+  const handleToggleReminders = async () => {
+    if (settings.enabled) {
+      setReminderSettings({ enabled: false });
+      return;
+    }
+    if (notificationsSupported && Notification.permission !== 'granted') {
+      const result = await Notification.requestPermission();
+      if (result !== 'granted') {
+        setPermissionDenied(true);
+        // Still enable — the in-app "quests left today" banner keeps working
+        // even without OS notification permission.
+      } else {
+        setPermissionDenied(false);
+      }
+    }
+    setReminderSettings({ enabled: true });
+  };
+
+  const handleExport = () => {
+    const json = exportData();
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `questlog-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportFile = async (file: File) => {
+    const confirmed = confirm(
+      'Import this backup? It will replace your current character, quests, gold, and history. This cannot be undone.',
+    );
+    if (!confirmed) {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+    const text = await file.text();
+    const result = importData(text);
+    setImportMessage({ text: result.ok ? 'Backup imported successfully.' : (result.error ?? 'Import failed.'), error: !result.ok });
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
   const handleReset = () => {
     const confirmed = confirm(
@@ -15,11 +70,89 @@ export function Settings({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-[560px] rounded-t-3xl border-t border-gold-500/40 bg-ink-900 p-5 pb-8">
+      <div className="max-h-[92dvh] w-full max-w-[560px] overflow-y-auto rounded-t-3xl border-t border-gold-500/40 bg-ink-900 p-5 pb-8">
         <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-white/20" />
         <h2 className="font-display text-lg font-bold text-gold-300">Settings</h2>
 
-        <div className="mt-6 rounded-xl border border-blood-500/40 bg-blood-500/5 p-4">
+        <div className="mt-6 rounded-xl border border-white/10 bg-ink-800/50 p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-display text-sm font-semibold text-gold-300">Daily reminder</h3>
+              <p className="mt-0.5 text-xs text-white/40">Best-effort — only fires while the app has been opened recently</p>
+            </div>
+            <button
+              onClick={handleToggleReminders}
+              role="switch"
+              aria-checked={settings.enabled}
+              className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
+                settings.enabled ? 'bg-gold-500' : 'bg-white/15'
+              }`}
+            >
+              <span
+                className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-transform ${
+                  settings.enabled ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+
+          {settings.enabled && (
+            <div className="mt-3">
+              <label className="block text-xs uppercase tracking-wide text-white/50">Remind me at</label>
+              <input
+                type="time"
+                value={settings.time}
+                onChange={(e) => setReminderSettings({ time: e.target.value })}
+                className="mt-1.5 w-full rounded-lg border border-white/15 bg-ink-900 px-3 py-2 text-white outline-none focus:border-gold-500/70"
+              />
+              {permissionDenied && (
+                <p className="mt-2 text-xs text-blood-400">
+                  Notification permission was denied — you'll still see the "quests left today" banner in the app,
+                  but won't get an OS notification. You can allow notifications for this site in your browser
+                  settings.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 rounded-xl border border-white/10 bg-ink-800/50 p-4">
+          <h3 className="font-display text-sm font-semibold text-gold-300">Backup</h3>
+          <p className="mt-1 text-xs text-white/40">
+            Your data lives only on this device. Export a backup file to keep somewhere safe or move to a new phone.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <button
+              onClick={handleExport}
+              className="flex-1 rounded-lg border border-gold-500/50 bg-gold-500/10 py-2 text-sm font-medium text-gold-300 active:scale-95"
+            >
+              Export data
+            </button>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex-1 rounded-lg border border-white/15 py-2 text-sm font-medium text-white/70 active:scale-95"
+            >
+              Import data
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleImportFile(file);
+              }}
+            />
+          </div>
+          {importMessage && (
+            <p className={`mt-2 text-xs ${importMessage.error ? 'text-blood-400' : 'text-verdant-400'}`}>
+              {importMessage.text}
+            </p>
+          )}
+        </div>
+
+        <div className="mt-4 rounded-xl border border-blood-500/40 bg-blood-500/5 p-4">
           <h3 className="font-display text-sm font-semibold text-blood-400">Danger zone</h3>
           <p className="mt-1 text-sm text-white/50">
             Wipe your character, quests, gold, and history, and start over from a fresh, unnamed character. This

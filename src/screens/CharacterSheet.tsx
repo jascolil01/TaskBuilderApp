@@ -1,17 +1,21 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
+import type { AttributeKey } from '../types';
 import { ATTRIBUTE_INFO, ATTRIBUTE_KEYS, getCharacterClass, getCharacterLevel, getTier, xpToNextLevel } from '../lib/rpg';
 import { getNextPerk, getUnlockedPerks, isAtRisk, isDecaying } from '../lib/rpg';
 import { XpBar } from '../components/XpBar';
 import { Avatar } from '../components/Avatar';
 import { WalkingCharacter } from '../components/WalkingCharacter';
+import { BossBattleCard } from '../components/BossBattleCard';
 import { Settings } from './Settings';
+import { ShareCard } from './ShareCard';
 
 export function CharacterSheet() {
   const character = useStore((s) => s.character);
   const allHabits = useStore((s) => s.habits);
   const habits = useMemo(() => allHabits.filter((h) => !h.archived), [allHabits]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const level = useMemo(() => getCharacterLevel(character.attributes), [character.attributes]);
   const { attribute: dominantAttribute, className } = useMemo(
@@ -31,9 +35,35 @@ export function CharacterSheet() {
   const decayingCount = habits.filter(isDecaying).length;
   const atRiskCount = habits.filter(isAtRisk).length;
 
+  const prevLevelsRef = useRef<Record<AttributeKey, number> | null>(null);
+  const [pulsing, setPulsing] = useState<Set<AttributeKey>>(new Set());
+
+  useEffect(() => {
+    const snapshot = ATTRIBUTE_KEYS.reduce(
+      (acc, k) => ({ ...acc, [k]: character.attributes[k].level }),
+      {} as Record<AttributeKey, number>,
+    );
+    const prev = prevLevelsRef.current;
+    prevLevelsRef.current = snapshot;
+    if (!prev) return;
+
+    const leveled = ATTRIBUTE_KEYS.filter((k) => snapshot[k] > prev[k]);
+    if (leveled.length === 0) return;
+    setPulsing(new Set(leveled));
+    const timer = setTimeout(() => setPulsing(new Set()), 1400);
+    return () => clearTimeout(timer);
+  }, [character.attributes]);
+
   return (
     <div className="flex flex-col gap-5 px-4 pb-28 pt-6">
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <button
+          onClick={() => setShareOpen(true)}
+          aria-label="Share character card"
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-white/50 active:scale-90"
+        >
+          ⤴
+        </button>
         <button
           onClick={() => setSettingsOpen(true)}
           aria-label="Settings"
@@ -58,14 +88,25 @@ export function CharacterSheet() {
           <XpBar level={level} xp={0} pct={avgProgressPct} color="var(--color-gold-500)" height={12} />
         </div>
         <p className="mt-2 text-xs text-white/50">{totalXp} total experience earned</p>
-        <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-ink-900/60 px-3 py-1 text-sm">
-          <span>🪙</span>
-          <span className="font-display font-semibold text-gold-300">{character.gold}</span>
-          <span className="text-xs text-white/40">gold</span>
+        <div className="mt-3 flex items-center justify-center gap-2">
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-ink-900/60 px-3 py-1 text-sm">
+            <span>🪙</span>
+            <span className="font-display font-semibold text-gold-300">{character.gold}</span>
+            <span className="text-xs text-white/40">gold</span>
+          </div>
+          {character.streakSaves > 0 && (
+            <div className="inline-flex items-center gap-1.5 rounded-full bg-ink-900/60 px-3 py-1 text-sm">
+              <span>🛡️</span>
+              <span className="font-display font-semibold text-white/80">{character.streakSaves}</span>
+              <span className="text-xs text-white/40">streak saves</span>
+            </div>
+          )}
         </div>
       </div>
 
       <WalkingCharacter attribute={dominantAttribute} />
+
+      <BossBattleCard />
 
       {(decayingCount > 0 || atRiskCount > 0) && (
         <div className="rounded-xl border border-blood-500/50 bg-blood-500/10 px-4 py-3 text-sm">
@@ -89,8 +130,14 @@ export function CharacterSheet() {
           const info = ATTRIBUTE_INFO[key];
           const unlockedPerks = getUnlockedPerks(key, attr.level);
           const nextPerk = getNextPerk(key, attr.level);
+          const justLeveled = pulsing.has(key);
           return (
-            <div key={key} className="parchment-border rounded-xl bg-ink-800/50 p-3">
+            <div
+              key={key}
+              className={`parchment-border rounded-xl bg-ink-800/50 p-3 transition-shadow duration-500 ${
+                justLeveled ? 'ring-2 ring-gold-300 shadow-[0_0_20px_rgba(246,211,101,0.45)]' : ''
+              }`}
+            >
               <div className="flex items-baseline justify-between">
                 <div>
                   <span className="font-display font-semibold" style={{ color: info.color }}>
@@ -132,6 +179,7 @@ export function CharacterSheet() {
       </div>
 
       {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
+      {shareOpen && <ShareCard onClose={() => setShareOpen(false)} />}
     </div>
   );
 }

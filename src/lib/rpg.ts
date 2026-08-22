@@ -130,6 +130,7 @@ export function processHabitDecay(habit: Habit, today: string): DecayResult {
 }
 
 export const GOLD_PER_XP = 1;
+export const STREAK_SAVE_COST = 120;
 
 export interface Tier {
   name: string;

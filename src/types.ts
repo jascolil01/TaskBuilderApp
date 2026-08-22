@@ -38,6 +38,7 @@ export interface CharacterState {
   createdAt: string;
   attributes: Attributes;
   gold: number;
+  streakSaves: number;
   lastDecayCheck: string;
 }
 
@@ -54,4 +55,20 @@ export interface RedemptionEntry {
   rewardName: string;
   cost: number;
   date: string;
+}
+
+export interface ReminderSettings {
+  enabled: boolean;
+  time: string;
+  lastNotifiedDate: string | null;
+}
+
+export interface BossVictory {
+  id: string;
+  weekStart: string;
+  bossName: string;
+  xpEarned: number;
+  threshold: number;
+  goldReward: number;
+  defeatedAt: string;
 }
