@@ -1,11 +1,12 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
 import type { AttributeKey } from '../types';
-import { ATTRIBUTE_INFO, ATTRIBUTE_KEYS, getCharacterClass, getCharacterLevel, getTier, xpToNextLevel } from '../lib/rpg';
+import { ATTRIBUTE_INFO, ATTRIBUTE_KEYS, getCharacterClass, getCharacterProgress, getTier, xpToNextLevel } from '../lib/rpg';
 import { getNextPerk, getUnlockedPerks, isAtRisk, isDecaying } from '../lib/rpg';
 import { XpBar } from '../components/XpBar';
 import { Avatar } from '../components/Avatar';
 import { BossBattleCard } from '../components/BossBattleCard';
+import { CheatDayCard } from '../components/CheatDayCard';
 
 // Three.js is a heavy dependency (~500KB) — load it only when this screen
 // actually renders the 3D widget, not as part of the app's initial bundle.
@@ -17,32 +18,24 @@ import { ShareCard } from './ShareCard';
 
 export function CharacterSheet() {
   const character = useStore((s) => s.character);
-  const completions = useStore((s) => s.completions);
   const allHabits = useStore((s) => s.habits);
   const habits = useMemo(() => allHabits.filter((h) => !h.archived), [allHabits]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
 
-  const level = useMemo(() => getCharacterLevel(character.attributes), [character.attributes]);
+  const progress = useMemo(() => getCharacterProgress(character.lifetimeXp), [character.lifetimeXp]);
+  const level = progress.level;
   const { attribute: dominantAttribute, className } = useMemo(
     () => getCharacterClass(character.attributes),
     [character.attributes],
   );
   const tier = useMemo(() => getTier(level), [level]);
 
-  // Lifetime XP actually earned, not the leftover XP sitting inside the
-  // current levels — that number resets on every level-up and made the
-  // label read far lower than what the player had earned.
-  const totalXp = useMemo(() => completions.reduce((sum, c) => sum + c.xpAwarded, 0), [completions]);
-  const avgProgressPct = useMemo(() => {
-    const sum = ATTRIBUTE_KEYS.reduce((acc, k) => {
-      const a = character.attributes[k];
-      return acc + a.xp / xpToNextLevel(a.level);
-    }, 0);
-    return Math.min(100, Math.round((sum / ATTRIBUTE_KEYS.length) * 100));
-  }, [character.attributes]);
-  const decayingCount = habits.filter(isDecaying).length;
-  const atRiskCount = habits.filter(isAtRisk).length;
+  // Lifetime XP is a monotonic counter on the character rather than a sum
+  // over completions, so deleting a quest can't retroactively demote you.
+  const totalXp = character.lifetimeXp;
+  const decayingCount = habits.filter((h) => isDecaying(h, character.attributes)).length;
+  const atRiskCount = habits.filter((h) => isAtRisk(h, character.attributes)).length;
 
   const prevLevelsRef = useRef<Record<AttributeKey, number> | null>(null);
   const [pulsing, setPulsing] = useState<Set<AttributeKey>>(new Set());
@@ -94,9 +87,11 @@ export function CharacterSheet() {
           Level {level} {className}
         </p>
         <div className="mt-4">
-          <XpBar level={level} xp={0} pct={avgProgressPct} color="var(--color-gold-500)" height={12} />
+          <XpBar level={level} xp={progress.xpIntoLevel} pct={Math.round((progress.xpIntoLevel / progress.xpForNext) * 100)} color="var(--color-gold-500)" height={12} />
         </div>
-        <p className="mt-2 text-xs text-white/50">{totalXp} total experience earned</p>
+        <p className="mt-2 text-xs text-white/50">
+          {progress.xpIntoLevel} / {progress.xpForNext} XP to level {level + 1} · {totalXp} earned all-time
+        </p>
         <div className="mt-3 flex items-center justify-center gap-2">
           <div className="inline-flex items-center gap-1.5 rounded-full bg-ink-900/60 px-3 py-1 text-sm">
             <span>🪙</span>
@@ -118,6 +113,8 @@ export function CharacterSheet() {
       </Suspense>
 
       <BossBattleCard />
+
+      <CheatDayCard />
 
       {(decayingCount > 0 || atRiskCount > 0) && (
         <div className="rounded-xl border border-blood-500/50 bg-blood-500/10 px-4 py-3 text-sm">
@@ -171,17 +168,20 @@ export function CharacterSheet() {
                     <span
                       key={perk.level}
                       title={perk.description}
-                      className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                        perk.signature ? 'ring-1 ring-gold-300/70' : ''
+                      }`}
                       style={{ background: `color-mix(in srgb, ${info.color} 20%, transparent)`, color: info.color }}
                     >
-                      {perk.name}
+                      {perk.signature ? `✦ ${perk.name}` : perk.name}
                     </span>
                   ))}
                 </div>
               )}
               {nextPerk && (
                 <p className="mt-1.5 text-[11px] text-white/30">
-                  Next perk at Lv {nextPerk.level}: {nextPerk.name}
+                  Next at Lv {nextPerk.level}: <span className="text-white/45">{nextPerk.name}</span> —{' '}
+                  {nextPerk.description}
                 </p>
               )}
             </div>

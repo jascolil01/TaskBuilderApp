@@ -3,13 +3,14 @@ import type {
   Attributes,
   BossVictory,
   CharacterState,
+  CheatDayState,
   CompletionEntry,
   Habit,
   RedemptionEntry,
   ReminderSettings,
   Reward,
 } from '../types';
-import { ATTRIBUTE_KEYS } from './rpg';
+import { ATTRIBUTE_KEYS, SIGNATURE_LEVEL } from './rpg';
 import { todayStr } from './date';
 
 export interface BackupData {
@@ -46,16 +47,52 @@ function parseAttributes(raw: unknown): Attributes | null {
   return out;
 }
 
-function parseCharacter(raw: unknown): CharacterState | null {
+function parseCheatDay(raw: unknown, conLevel: number): CheatDayState {
+  const unlockedByLevel = conLevel >= SIGNATURE_LEVEL;
+  if (!isObj(raw)) {
+    // Backup predates the perk: rebuild from the level it records.
+    return {
+      unlocked: unlockedByLevel,
+      charges: unlockedByLevel ? 1 : 0,
+      progressToNext: 0,
+      usedDates: [],
+    };
+  }
+  return {
+    unlocked: raw.unlocked === true || unlockedByLevel,
+    charges: Math.min(1, Math.max(0, Math.floor(finiteNum(raw.charges, 0)))),
+    progressToNext: Math.max(0, Math.floor(finiteNum(raw.progressToNext, 0))),
+    usedDates: Array.isArray(raw.usedDates)
+      ? raw.usedDates.filter((d): d is string => typeof d === 'string')
+      : [],
+  };
+}
+
+function parseCharacter(raw: unknown, completions: unknown): CharacterState | null {
   if (!isObj(raw)) return null;
   const attributes = parseAttributes(raw.attributes);
   if (!attributes) return null;
+
+  // Older backups have no lifetimeXp — reconstruct it from the completion
+  // log so an import doesn't silently reset the character's level.
+  const lifetimeXp =
+    typeof raw.lifetimeXp === 'number' && Number.isFinite(raw.lifetimeXp)
+      ? Math.max(0, Math.floor(raw.lifetimeXp))
+      : Array.isArray(completions)
+        ? completions.reduce<number>(
+            (sum, c) => sum + (isObj(c) ? Math.max(0, finiteNum(c.xpAwarded, 0)) : 0),
+            0,
+          )
+        : 0;
+
   return {
     name: typeof raw.name === 'string' ? raw.name.slice(0, 24) : '',
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
     attributes,
     gold: Math.max(0, Math.floor(finiteNum(raw.gold, 0))),
     streakSaves: Math.max(0, Math.floor(finiteNum(raw.streakSaves, 0))),
+    lifetimeXp,
+    cheatDay: parseCheatDay(raw.cheatDay, attributes.CON.level),
     lastDecayCheck: typeof raw.lastDecayCheck === 'string' ? raw.lastDecayCheck : todayStr(),
   };
 }
@@ -140,6 +177,7 @@ function parseRedemption(raw: unknown): RedemptionEntry | null {
     rewardName: raw.rewardName.slice(0, 60),
     cost: Math.max(0, Math.floor(finiteNum(raw.cost, 0))),
     date: raw.date,
+    kind: raw.kind === 'utility' || raw.rewardId === 'streak-save' ? 'utility' : 'reward',
   };
 }
 
@@ -192,7 +230,7 @@ export function parseBackup(json: string): ParseResult {
     return { ok: false, error: "This file doesn't look like a Questlog backup." };
   }
 
-  const character = parseCharacter(parsed.character);
+  const character = parseCharacter(parsed.character, parsed.completions);
   if (!character) {
     return {
       ok: false,

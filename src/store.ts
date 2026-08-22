@@ -2,7 +2,9 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type {
   AttributeKey,
+  Attributes,
   BossVictory,
+  BossWeek,
   CharacterState,
   CompletionEntry,
   Frequency,
@@ -14,12 +16,20 @@ import type {
 import { addDays, todayStr } from './lib/date';
 import {
   addXp,
+  ATTRIBUTE_KEYS,
+  CHEAT_DAY_RECHARGE_COMPLETIONS,
   createAttributes,
+  DEEP_WORK_SPILL,
+  getCompletionAward,
   getCrossedPerks,
-  GOLD_PER_XP,
+  getDecayPerMiss,
+  getEffectiveGraceDays,
+  hasSignature,
   isDecaying,
+  isScheduledDay,
   processHabitDecay,
   removeXp,
+  SIGNATURE_LEVEL,
   STREAK_SAVE_COST,
 } from './lib/rpg';
 import { getBossForWeek, getBossGoldReward, getBossThreshold, getWeeklyXpEarned, getWeekStart } from './lib/boss';
@@ -73,9 +83,11 @@ interface Store {
   rewards: Reward[];
   redemptions: RedemptionEntry[];
   bossVictories: BossVictory[];
+  bossWeek: BossWeek | null;
   settings: ReminderSettings;
 
   setCharacterName: (name: string) => void;
+  spendCheatDay: () => void;
   setReminderSettings: (patch: Partial<Pick<ReminderSettings, 'enabled' | 'time'>>) => void;
   markReminderNotified: (date: string) => void;
   runDecayCheck: () => void;
@@ -112,6 +124,8 @@ function createInitialState() {
       attributes: createAttributes(),
       gold: 0,
       streakSaves: 0,
+      lifetimeXp: 0,
+      cheatDay: { unlocked: false, charges: 0, progressToNext: 0, usedDates: [] as string[] },
       lastDecayCheck: todayStr(),
     },
     habits: starterHabits(),
@@ -119,7 +133,30 @@ function createInitialState() {
     rewards: starterRewards(),
     redemptions: [] as RedemptionEntry[],
     bossVictories: [] as BossVictory[],
+    bossWeek: null as BossWeek | null,
   };
+}
+
+/**
+ * Grants the Cheat Day charge the first time Constitution reaches the
+ * signature level. Runs on every state change that could have crossed it.
+ */
+function withCheatDayUnlock(character: CharacterState): CharacterState {
+  if (character.cheatDay.unlocked) return character;
+  if (character.attributes.CON.level < SIGNATURE_LEVEL) return character;
+  return { ...character, cheatDay: { ...character.cheatDay, unlocked: true, charges: 1 } };
+}
+
+/** Cheat Day charges are re-earned through completions, not elapsed time. */
+function advanceCheatDayRecharge(character: CharacterState): CharacterState {
+  const { cheatDay } = character;
+  if (!cheatDay.unlocked || cheatDay.charges > 0) return character;
+  const progress = cheatDay.progressToNext + 1;
+  if (progress < CHEAT_DAY_RECHARGE_COMPLETIONS) {
+    return { ...character, cheatDay: { ...cheatDay, progressToNext: progress } };
+  }
+  useToastStore.getState().show('🍰 Cheat Day recharged — you have a rest day banked.');
+  return { ...character, cheatDay: { ...cheatDay, charges: 1, progressToNext: 0 } };
 }
 
 export const useStore = create<Store>()(
@@ -140,14 +177,26 @@ export const useStore = create<Store>()(
       runDecayCheck: () =>
         set((state) => {
           const today = todayStr();
-          let attributes = { ...state.character.attributes };
+          const baseAttributes = state.character.attributes;
+          const cheatDates = state.character.cheatDay.usedDates;
+          let attributes = { ...baseAttributes };
           let streakSaves = state.character.streakSaves;
           let changed = false;
+
           const habits = state.habits.map((h) => {
-            const wasDecaying = isDecaying(h);
-            const { habit: updated, xpLoss } = processHabitDecay(h, today);
+            // Perk bonuses are read from the pre-decay attributes so that one
+            // habit's decay can't silently weaken another habit's grace
+            // period in the middle of the same pass.
+            const graceDays = getEffectiveGraceDays(h, baseAttributes);
+            const wasDecaying = isDecaying(h, baseAttributes);
+            const { habit: updated, xpLoss } = processHabitDecay(h, today, {
+              graceDays,
+              perMiss: getDecayPerMiss(h, baseAttributes),
+              forgivenDates: h.attribute === 'CON' ? cheatDates : undefined,
+            });
+
             if (xpLoss > 0) {
-              const firstCrossing = !wasDecaying && isDecaying(updated);
+              const firstCrossing = !wasDecaying && isDecaying(updated, baseAttributes);
               if (firstCrossing && streakSaves > 0) {
                 streakSaves -= 1;
                 changed = true;
@@ -160,12 +209,44 @@ export const useStore = create<Store>()(
             if (updated !== h) changed = true;
             return updated;
           });
+
+          // Freeze this week's boss target. Recomputing it live let a player
+          // archive a habit mid-week to lower a bar they'd already missed.
+          const weekStart = getWeekStart(today);
+          const bossWeek =
+            state.bossWeek?.weekStart === weekStart
+              ? state.bossWeek
+              : { weekStart, threshold: getBossThreshold(habits.filter((h) => !h.archived)) };
+          if (bossWeek !== state.bossWeek) changed = true;
+
           if (!changed && state.character.lastDecayCheck === today) return state;
           return {
             habits,
+            bossWeek,
             character: { ...state.character, attributes, streakSaves, lastDecayCheck: today },
           };
         }),
+
+      spendCheatDay: () => {
+        const state = get();
+        const today = todayStr();
+        const { cheatDay } = state.character;
+        if (!cheatDay.unlocked || cheatDay.charges < 1) return;
+        if (cheatDay.usedDates.includes(today)) return;
+
+        useToastStore.getState().show('🍰 Cheat Day spent — Constitution quests are forgiven today.');
+        set((s) => ({
+          character: {
+            ...s.character,
+            cheatDay: {
+              ...s.character.cheatDay,
+              charges: s.character.cheatDay.charges - 1,
+              progressToNext: 0,
+              usedDates: [...s.character.cheatDay.usedDates, today],
+            },
+          },
+        }));
+      },
 
       addHabit: (input) =>
         set((state) => ({
@@ -211,14 +292,19 @@ export const useStore = create<Store>()(
         const habit = state.habits.find((h) => h.id === id);
         if (!habit || habit.lastCompletedDate === today) return;
 
-        const newStreak = habit.streak + 1;
-        const goldAwarded = habit.xpReward * GOLD_PER_XP;
+        // Completing on a day the quest isn't scheduled still earns its
+        // rewards — extra effort should count — but it must not build a
+        // streak or wipe out misses on the days it actually was due.
+        const onSchedule = isScheduledDay(habit, today);
+        const newStreak = onSchedule ? habit.streak + 1 : habit.streak;
+
+        const award = getCompletionAward(habit, state.character.attributes, onSchedule ? newStreak : 0);
         const entry: CompletionEntry = {
           id: makeId(),
           habitId: id,
           date: today,
-          xpAwarded: habit.xpReward,
-          goldAwarded,
+          xpAwarded: award.xp,
+          goldAwarded: award.gold,
           prevProgress: {
             streak: habit.streak,
             bestStreak: habit.bestStreak,
@@ -229,38 +315,62 @@ export const useStore = create<Store>()(
         };
 
         const oldLevel = state.character.attributes[habit.attribute].level;
-        const newAttrState = addXp(state.character.attributes[habit.attribute], habit.xpReward);
+        const newAttrState = addXp(state.character.attributes[habit.attribute], award.xp);
         const crossedPerks = getCrossedPerks(habit.attribute, oldLevel, newAttrState.level);
         if (crossedPerks.length > 0) {
           const perk = crossedPerks[crossedPerks.length - 1];
-          useToastStore.getState().show(`🎉 Perk unlocked: ${perk.name} (${habit.attribute} Lv ${perk.level})`);
+          const label = perk.signature ? '✨ Signature perk unlocked' : '🎉 Perk unlocked';
+          useToastStore.getState().show(`${label}: ${perk.name} (${habit.attribute} Lv ${perk.level})`);
         } else if (newAttrState.level > oldLevel) {
           useToastStore.getState().show(`⭐ ${habit.attribute} leveled up to ${newAttrState.level}!`);
+        } else if (award.doubled) {
+          useToastStore.getState().show(`⚔️ Berserker! ${newStreak}-day streak paid double XP.`);
         }
 
-        set((s) => ({
-          character: {
+        set((s) => {
+          const attributes: Attributes = {
+            ...s.character.attributes,
+            [habit.attribute]: addXp(s.character.attributes[habit.attribute], award.xp),
+          };
+
+          // Deep Work: Intelligence quests lift every other attribute too.
+          let spilled = 0;
+          if (award.spilloverXp > 0) {
+            for (const key of ATTRIBUTE_KEYS) {
+              if (key === habit.attribute) continue;
+              attributes[key] = addXp(attributes[key], award.spilloverXp);
+              spilled += award.spilloverXp;
+            }
+          }
+
+          let character: CharacterState = {
             ...s.character,
-            gold: s.character.gold + goldAwarded,
-            attributes: {
-              ...s.character.attributes,
-              [habit.attribute]: addXp(s.character.attributes[habit.attribute], habit.xpReward),
-            },
-          },
-          habits: s.habits.map((h) =>
-            h.id === id
-              ? {
-                  ...h,
-                  streak: newStreak,
-                  bestStreak: Math.max(h.bestStreak, newStreak),
-                  lastCompletedDate: today,
-                  decayedThroughDate: today,
-                  missedSinceCompletion: 0,
-                }
-              : h,
-          ),
-          completions: [...s.completions, entry],
-        }));
+            gold: s.character.gold + award.gold,
+            lifetimeXp: s.character.lifetimeXp + award.xp + spilled,
+            attributes,
+          };
+          character = withCheatDayUnlock(character);
+          character = advanceCheatDayRecharge(character);
+
+          return {
+            character,
+            habits: s.habits.map((h) =>
+              h.id === id
+                ? {
+                    ...h,
+                    streak: newStreak,
+                    bestStreak: Math.max(h.bestStreak, newStreak),
+                    lastCompletedDate: today,
+                    decayedThroughDate: today,
+                    missedSinceCompletion: onSchedule ? 0 : h.missedSinceCompletion,
+                  }
+                : h,
+            ),
+            completions: [...s.completions, entry],
+          };
+        });
+
+        get().claimBossVictory();
       },
 
       undoCompleteHabit: (id) => {
@@ -301,18 +411,37 @@ export const useStore = create<Store>()(
               missedSinceCompletion: 0,
             };
 
-        set((s) => ({
-          character: {
-            ...s.character,
-            gold: s.character.gold - todaysEntry.goldAwarded,
-            attributes: {
-              ...s.character.attributes,
-              [habit.attribute]: removeXp(s.character.attributes[habit.attribute], todaysEntry.xpAwarded),
+        set((s) => {
+          const attributes: Attributes = {
+            ...s.character.attributes,
+            [habit.attribute]: removeXp(s.character.attributes[habit.attribute], todaysEntry.xpAwarded),
+          };
+
+          // Mirror the Deep Work spillover this completion handed out, so the
+          // other five attributes don't keep XP from an undone quest.
+          let spilled = 0;
+          if (habit.attribute === 'INT' && hasSignature(s.character.attributes, 'deep-work')) {
+            const spill = Math.floor(todaysEntry.xpAwarded * DEEP_WORK_SPILL);
+            if (spill > 0) {
+              for (const key of ATTRIBUTE_KEYS) {
+                if (key === habit.attribute) continue;
+                attributes[key] = removeXp(attributes[key], spill);
+                spilled += spill;
+              }
+            }
+          }
+
+          return {
+            character: {
+              ...s.character,
+              gold: s.character.gold - todaysEntry.goldAwarded,
+              lifetimeXp: Math.max(0, s.character.lifetimeXp - todaysEntry.xpAwarded - spilled),
+              attributes,
             },
-          },
-          habits: s.habits.map((h) => (h.id === id ? { ...h, ...restored } : h)),
-          completions: remaining,
-        }));
+            habits: s.habits.map((h) => (h.id === id ? { ...h, ...restored } : h)),
+            completions: remaining,
+          };
+        });
       },
 
       addReward: (input) =>
@@ -349,6 +478,7 @@ export const useStore = create<Store>()(
           rewardName: reward.name,
           cost: reward.cost,
           date: todayStr(),
+          kind: 'reward',
         };
 
         set((s) => ({
@@ -367,6 +497,7 @@ export const useStore = create<Store>()(
           rewardName: 'Streak Save Charge',
           cost: STREAK_SAVE_COST,
           date: todayStr(),
+          kind: 'utility',
         };
 
         set((s) => ({
@@ -385,8 +516,12 @@ export const useStore = create<Store>()(
         const weekStart = getWeekStart(today);
         if (state.bossVictories.some((v) => v.weekStart === weekStart)) return;
 
-        const activeHabits = state.habits.filter((h) => !h.archived);
-        const threshold = getBossThreshold(activeHabits);
+        // Use the target frozen at the start of the week; fall back to a live
+        // figure only if this is the very first check of a fresh week.
+        const threshold =
+          state.bossWeek?.weekStart === weekStart
+            ? state.bossWeek.threshold
+            : getBossThreshold(state.habits.filter((h) => !h.archived));
         const xpEarned = getWeeklyXpEarned(state.completions, weekStart);
         if (xpEarned < threshold) return;
 
@@ -412,10 +547,10 @@ export const useStore = create<Store>()(
       resetAll: () => set(createInitialState()),
 
       exportData: () => {
-        const { character, habits, completions, rewards, redemptions, bossVictories, settings } = get();
+        const { character, habits, completions, rewards, redemptions, bossVictories, bossWeek, settings } = get();
         return JSON.stringify(
           {
-            version: 1,
+            version: 2,
             exportedAt: new Date().toISOString(),
             character,
             habits,
@@ -423,6 +558,7 @@ export const useStore = create<Store>()(
             rewards,
             redemptions,
             bossVictories,
+            bossWeek,
             settings,
           },
           null,
@@ -442,11 +578,42 @@ export const useStore = create<Store>()(
           rewards: data.rewards,
           redemptions: data.redemptions,
           bossVictories: data.bossVictories,
+          bossWeek: null,
           ...(data.settings ? { settings: data.settings } : {}),
         });
         return { ok: true };
       },
     }),
-    { name: 'questlog-rpg-storage' },
+    {
+      name: 'questlog-rpg-storage',
+      version: 2,
+      migrate: (persisted, fromVersion) => {
+        const state = persisted as Partial<Store> & { character?: Partial<CharacterState> };
+        if (fromVersion >= 2 || !state?.character) return state as Store;
+
+        // v1 had no lifetimeXp and no cheat-day state. Seed lifetime XP from
+        // the completion log so existing players keep the progress they
+        // earned rather than restarting at character level 1.
+        const completions = Array.isArray(state.completions) ? state.completions : [];
+        const character = state.character;
+        return {
+          ...state,
+          character: {
+            ...character,
+            lifetimeXp:
+              typeof character.lifetimeXp === 'number'
+                ? character.lifetimeXp
+                : completions.reduce((sum, c) => sum + (c?.xpAwarded ?? 0), 0),
+            cheatDay: character.cheatDay ?? {
+              unlocked: (character.attributes?.CON?.level ?? 1) >= SIGNATURE_LEVEL,
+              charges: (character.attributes?.CON?.level ?? 1) >= SIGNATURE_LEVEL ? 1 : 0,
+              progressToNext: 0,
+              usedDates: [],
+            },
+          },
+          bossWeek: null,
+        } as Store;
+      },
+    },
   ),
 );

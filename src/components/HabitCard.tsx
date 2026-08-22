@@ -3,13 +3,22 @@ import type { Habit } from '../types';
 import { ATTRIBUTE_INFO, GOLD_PER_XP, isAtRisk, isDecaying } from '../lib/rpg';
 import { todayStr, weekdayLabel } from '../lib/date';
 
-export function HabitCard({ habit, onEdit }: { habit: Habit; onEdit: (habit: Habit) => void }) {
+export function HabitCard({
+  habit,
+  onEdit,
+  offSchedule = false,
+}: {
+  habit: Habit;
+  onEdit: (habit: Habit) => void;
+  offSchedule?: boolean;
+}) {
   const completeHabit = useStore((s) => s.completeHabit);
   const undoCompleteHabit = useStore((s) => s.undoCompleteHabit);
   const info = ATTRIBUTE_INFO[habit.attribute];
   const doneToday = habit.lastCompletedDate === todayStr();
-  const decaying = isDecaying(habit);
-  const atRisk = isAtRisk(habit);
+  const attributes = useStore((s) => s.character.attributes);
+  const decaying = isDecaying(habit, attributes);
+  const atRisk = isAtRisk(habit, attributes);
 
   const scheduleLabel =
     habit.frequency.type === 'daily'
@@ -53,6 +62,7 @@ export function HabitCard({ habit, onEdit }: { habit: Habit; onEdit: (habit: Hab
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-white/40">
             <span>{scheduleLabel}</span>
+            {offSchedule && <span className="text-white/35">no streak credit</span>}
             {habit.streak > 0 && <span className="text-gold-400/90">🔥 {habit.streak} day streak</span>}
             {decaying && <span className="text-blood-400">⚠ decaying ({habit.missedSinceCompletion}d missed)</span>}
             {!decaying && atRisk && (

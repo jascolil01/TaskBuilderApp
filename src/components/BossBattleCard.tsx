@@ -9,18 +9,24 @@ export function BossBattleCard() {
   const habits = useStore((s) => s.habits);
   const completions = useStore((s) => s.completions);
   const bossVictories = useStore((s) => s.bossVictories);
-  const claimBossVictory = useStore((s) => s.claimBossVictory);
+  const bossWeek = useStore((s) => s.bossWeek);
 
   const today = todayStr();
   const weekStart = getWeekStart(today);
   const weekEnd = getWeekEnd(weekStart);
   const boss = useMemo(() => getBossForWeek(weekStart), [weekStart]);
-  const activeHabits = useMemo(() => habits.filter((h) => !h.archived), [habits]);
-  const threshold = useMemo(() => getBossThreshold(activeHabits), [activeHabits]);
+  // The target is whatever was frozen when the week began, so editing quests
+  // mid-week can't move the bar you're being measured against.
+  const threshold = useMemo(
+    () =>
+      bossWeek?.weekStart === weekStart
+        ? bossWeek.threshold
+        : getBossThreshold(habits.filter((h) => !h.archived)),
+    [bossWeek, weekStart, habits],
+  );
   const xpEarned = useMemo(() => getWeeklyXpEarned(completions, weekStart), [completions, weekStart]);
-  const claimed = bossVictories.some((v) => v.weekStart === weekStart);
+  const victory = bossVictories.find((v) => v.weekStart === weekStart);
   const pct = Math.min(100, Math.round((xpEarned / threshold) * 100));
-  const canClaim = !claimed && xpEarned >= threshold;
   const daysLeft = Math.max(0, Math.round((parseDate(weekEnd).getTime() - parseDate(today).getTime()) / 86400000));
 
   return (
@@ -32,21 +38,14 @@ export function BossBattleCard() {
             {boss.name}
           </p>
           <p className="text-[11px] text-white/40">
-            {claimed
-              ? 'Defeated this week ✓'
+            {victory
+              ? `Defeated ✓ +${victory.goldReward} gold`
               : daysLeft > 0
                 ? `${daysLeft} day${daysLeft === 1 ? '' : 's'} left this week`
                 : 'Last day to strike!'}
           </p>
         </div>
-        {canClaim && (
-          <button
-            onClick={claimBossVictory}
-            className="shrink-0 rounded-full bg-gold-500 px-3 py-1.5 text-xs font-semibold text-ink-950 active:scale-95"
-          >
-            Defeat!
-          </button>
-        )}
+        {victory && <span className="shrink-0 text-lg">🏆</span>}
       </div>
       <div className="mt-3">
         <XpBar level={1} xp={0} pct={pct} color={boss.color} height={10} />

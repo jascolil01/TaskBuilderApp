@@ -12,6 +12,7 @@ import { ReminderScheduler } from './components/ReminderScheduler';
 function App() {
   const characterName = useStore((s) => s.character.name);
   const runDecayCheck = useStore((s) => s.runDecayCheck);
+  const claimBossVictory = useStore((s) => s.claimBossVictory);
   const [screen, setScreen] = useState<Screen>('character');
   const [hydrated, setHydrated] = useState(() => useStore.persist.hasHydrated());
 
@@ -21,15 +22,22 @@ function App() {
 
   useEffect(() => {
     if (!hydrated) return;
-    runDecayCheck();
-    const onFocus = () => runDecayCheck();
-    document.addEventListener('visibilitychange', onFocus);
-    window.addEventListener('focus', onFocus);
-    return () => {
-      document.removeEventListener('visibilitychange', onFocus);
-      window.removeEventListener('focus', onFocus);
+    // Boss rewards are awarded automatically. Checking on open as well as on
+    // completion means a week's target that was already met — including one
+    // met before this version, or on a device that was closed at the time —
+    // still pays out instead of expiring unclaimed.
+    const sync = () => {
+      runDecayCheck();
+      claimBossVictory();
     };
-  }, [hydrated, runDecayCheck]);
+    sync();
+    document.addEventListener('visibilitychange', sync);
+    window.addEventListener('focus', sync);
+    return () => {
+      document.removeEventListener('visibilitychange', sync);
+      window.removeEventListener('focus', sync);
+    };
+  }, [hydrated, runDecayCheck, claimBossVictory]);
 
   // localStorage hydration is synchronous in practice, but guard anyway so
   // decay processing never runs against pre-hydration default state.

@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useStore } from '../store';
-import { getCharacterClass, getCharacterLevel } from '../lib/rpg';
+import { getCharacterClass, getCharacterProgress } from '../lib/rpg';
 import { ShareCardSvg } from '../components/ShareCardSvg';
 
 const EXPORT_SCALE = 2;
@@ -13,7 +13,7 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  const level = getCharacterLevel(character.attributes);
+  const level = getCharacterProgress(character.lifetimeXp).level;
   const { attribute: dominantAttribute, className } = getCharacterClass(character.attributes);
 
   const renderToBlob = async (): Promise<Blob | null> => {

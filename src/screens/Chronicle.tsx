@@ -12,6 +12,12 @@ export function Chronicle() {
   const completions = useStore((s) => s.completions);
   const redemptions = useStore((s) => s.redemptions);
   const bossVictories = useStore((s) => s.bossVictories);
+  // Shop utilities (Streak Saves) are purchases, not real-life rewards, so
+  // they shouldn't pad the "rewards redeemed" tally.
+  const rewardRedemptions = useMemo(
+    () => redemptions.filter((r) => (r.kind ?? (r.rewardId === 'streak-save' ? 'utility' : 'reward')) === 'reward'),
+    [redemptions],
+  );
   const bossColorByName = useMemo(() => new Map(BOSS_ROSTER.map((b) => [b.name, b.color])), []);
 
   const totalXp = useMemo(() => completions.reduce((sum, c) => sum + c.xpAwarded, 0), [completions]);
@@ -50,7 +56,7 @@ export function Chronicle() {
         <StatTile label="Total XP earned" value={totalXp} icon="⭐" />
         <StatTile label="Quests completed" value={completions.length} icon="✅" />
         <StatTile label="Longest streak" value={longestStreak} icon="🔥" />
-        <StatTile label="Rewards redeemed" value={redemptions.length} icon="🎁" />
+        <StatTile label="Rewards redeemed" value={rewardRedemptions.length} icon="🎁" />
       </div>
 
       <XpHistoryChart data={chartData} />

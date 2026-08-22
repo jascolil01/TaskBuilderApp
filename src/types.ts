@@ -49,13 +49,40 @@ export interface CompletionEntry {
   prevProgress?: HabitProgressSnapshot;
 }
 
+/**
+ * Constitution's signature perk. Charges are spent to forgive a day of
+ * Constitution quests, and re-earned through consistency rather than time.
+ */
+export interface CheatDayState {
+  /** Set once Constitution first reaches the signature level. */
+  unlocked: boolean;
+  charges: number;
+  /** Completions logged since the last charge was spent. */
+  progressToNext: number;
+  /** Days already forgiven — decay skips Constitution quests on these. */
+  usedDates: string[];
+}
+
 export interface CharacterState {
   name: string;
   createdAt: string;
   attributes: Attributes;
   gold: number;
   streakSaves: number;
+  /**
+   * Monotonic total of every XP point ever earned. Drives character level.
+   * Deliberately not derived from `completions`, so deleting a habit can
+   * never retroactively demote the character.
+   */
+  lifetimeXp: number;
+  cheatDay: CheatDayState;
   lastDecayCheck: string;
+}
+
+/** The boss target is frozen at the start of each week so mid-week habit edits can't move the bar. */
+export interface BossWeek {
+  weekStart: string;
+  threshold: number;
 }
 
 export interface Reward {
@@ -71,6 +98,12 @@ export interface RedemptionEntry {
   rewardName: string;
   cost: number;
   date: string;
+  /**
+   * 'reward' is a real-life treat you cashed out; 'utility' is a gameplay
+   * purchase like a Streak Save. Kept apart so buying an item doesn't
+   * inflate the "rewards redeemed" stat. Absent on older entries.
+   */
+  kind?: 'reward' | 'utility';
 }
 
 export interface ReminderSettings {

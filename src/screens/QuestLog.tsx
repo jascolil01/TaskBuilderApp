@@ -4,6 +4,7 @@ import type { Habit } from '../types';
 import { HabitCard } from '../components/HabitCard';
 import { todayStr } from '../lib/date';
 import { getIncompleteTodayCount } from '../lib/reminders';
+import { isScheduledDay } from '../lib/rpg';
 import { AddEditHabit } from './AddEditHabit';
 
 export function QuestLog() {
@@ -15,14 +16,23 @@ export function QuestLog() {
   const today = todayStr();
   const incompleteCount = useMemo(() => getIncompleteTodayCount(active), [active]);
 
-  const sorted = useMemo(
-    () =>
-      [...active].sort((a, b) => {
-        const aDone = a.lastCompletedDate === today ? 1 : 0;
-        const bDone = b.lastCompletedDate === today ? 1 : 0;
-        if (aDone !== bDone) return aDone - bDone;
-        return a.name.localeCompare(b.name);
-      }),
+  const byDoneThenName = (a: Habit, b: Habit) => {
+    const aDone = a.lastCompletedDate === today ? 1 : 0;
+    const bDone = b.lastCompletedDate === today ? 1 : 0;
+    if (aDone !== bDone) return aDone - bDone;
+    return a.name.localeCompare(b.name);
+  };
+
+  // Quests due today drive the main list; the rest are still reachable but
+  // set apart, so the list agrees with the "quests left today" count.
+  const dueToday = useMemo(
+    () => active.filter((h) => isScheduledDay(h, today)).sort(byDoneThenName),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [active, today],
+  );
+  const offSchedule = useMemo(
+    () => active.filter((h) => !isScheduledDay(h, today)).sort(byDoneThenName),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [active, today],
   );
 
@@ -44,18 +54,44 @@ export function QuestLog() {
         </div>
       )}
 
-      {sorted.length === 0 ? (
+      {active.length === 0 ? (
         <div className="parchment-border mt-4 rounded-2xl bg-ink-800/50 p-6 text-center text-white/60">
           <p className="text-3xl">📜</p>
           <p className="mt-2 font-display text-gold-300">Your quest log is empty</p>
           <p className="mt-1 text-sm">Add a habit to start earning XP and training your character.</p>
         </div>
       ) : (
-        <div className="flex flex-col gap-2.5">
-          {sorted.map((h) => (
-            <HabitCard key={h.id} habit={h} onEdit={setEditing} />
-          ))}
-        </div>
+        <>
+          {dueToday.length > 0 && (
+            <div className="flex flex-col gap-2.5">
+              {dueToday.map((h) => (
+                <HabitCard key={h.id} habit={h} onEdit={setEditing} />
+              ))}
+            </div>
+          )}
+
+          {dueToday.length === 0 && (
+            <div className="parchment-border rounded-2xl bg-ink-800/50 p-6 text-center text-white/60">
+              <p className="text-3xl">🌙</p>
+              <p className="mt-2 font-display text-gold-300">Nothing scheduled today</p>
+              <p className="mt-1 text-sm">Enjoy the rest — or take on an off-day quest below.</p>
+            </div>
+          )}
+
+          {offSchedule.length > 0 && (
+            <div className="mt-2">
+              <h2 className="font-display text-sm uppercase tracking-widest text-white/40">Not scheduled today</h2>
+              <p className="mb-2 mt-0.5 text-[11px] text-white/30">
+                Still earns XP and gold, but won't build a streak.
+              </p>
+              <div className="flex flex-col gap-2.5 opacity-70">
+                {offSchedule.map((h) => (
+                  <HabitCard key={h.id} habit={h} onEdit={setEditing} offSchedule />
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {archived.length > 0 && (

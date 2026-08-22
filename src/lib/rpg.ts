@@ -23,7 +23,8 @@ export const CLASS_BY_ATTRIBUTE: Record<AttributeKey, string> = {
 
 const BASE_XP = 100;
 const XP_GROWTH = 40;
-export const DECAY_XP_PER_MISS = 12;
+/** A missed day past grace costs this share of what the quest pays. */
+export const DECAY_REWARD_FRACTION = 0.5;
 
 export function xpToNextLevel(level: number): number {
   return BASE_XP + (level - 1) * XP_GROWTH;
@@ -61,9 +62,34 @@ export function removeXp(attr: AttributeState, amount: number): AttributeState {
   return { level, xp };
 }
 
-export function getCharacterLevel(attributes: Attributes): number {
-  const levels = ATTRIBUTE_KEYS.map((k) => attributes[k].level);
-  return Math.max(1, Math.floor(levels.reduce((a, b) => a + b, 0) / levels.length));
+const CHAR_BASE_XP = 150;
+const CHAR_GROWTH = 100;
+
+/** XP needed to advance from `level` to `level + 1`. */
+export function xpForCharacterLevel(level: number): number {
+  return CHAR_BASE_XP + (level - 1) * CHAR_GROWTH;
+}
+
+export interface CharacterProgress {
+  level: number;
+  xpIntoLevel: number;
+  xpForNext: number;
+}
+
+/**
+ * Character level runs off total lifetime XP rather than the average of the
+ * six attributes. Averaging meant a focused player needed roughly 1,200 XP
+ * (~60 days of a daily quest) to move the headline number by one, because
+ * five untouched attributes dragged the average down.
+ */
+export function getCharacterProgress(lifetimeXp: number): CharacterProgress {
+  let level = 1;
+  let remaining = Math.max(0, lifetimeXp);
+  while (remaining >= xpForCharacterLevel(level)) {
+    remaining -= xpForCharacterLevel(level);
+    level += 1;
+  }
+  return { level, xpIntoLevel: remaining, xpForNext: xpForCharacterLevel(level) };
 }
 
 const CLASS_PRIORITY: AttributeKey[] = ['STR', 'INT', 'DEX', 'WIS', 'CHA', 'CON'];
@@ -90,29 +116,40 @@ export interface DecayResult {
   xpLoss: number;
 }
 
+export interface DecayOptions {
+  /** Grace days including perk bonuses. */
+  graceDays: number;
+  /** XP lost per missed day past grace, already adjusted for perks. */
+  perMiss: number;
+  /** Days forgiven by a spent Cheat Day charge — skipped entirely. */
+  forgivenDates?: readonly string[];
+}
+
 /**
  * Walks forward day-by-day from the habit's last processed date up to
  * (but not including) today, breaking the streak on the first missed
  * scheduled occurrence and accumulating attribute decay once the grace
  * period of missed occurrences has been exceeded.
  */
-export function processHabitDecay(habit: Habit, today: string): DecayResult {
+export function processHabitDecay(habit: Habit, today: string, options: DecayOptions): DecayResult {
   if (habit.archived) return { habit, xpLoss: 0 };
 
   const start = habit.decayedThroughDate ?? habit.lastCompletedDate ?? habit.createdAt.slice(0, 10);
   if (start >= today) return { habit, xpLoss: 0 };
 
+  const forgiven = options.forgivenDates ?? [];
   let cursor = addDays(start, 1);
   let missed = habit.missedSinceCompletion;
   let streak = habit.streak;
   let xpLoss = 0;
 
   while (cursor < today) {
-    if (isScheduledDay(habit, cursor)) {
+    // A forgiven day never counts as missed, so the streak survives it too.
+    if (isScheduledDay(habit, cursor) && !forgiven.includes(cursor)) {
       missed += 1;
       if (missed === 1) streak = 0;
-      if (missed > habit.graceDays) {
-        xpLoss += DECAY_XP_PER_MISS;
+      if (missed > options.graceDays) {
+        xpLoss += options.perMiss;
       }
     }
     cursor = addDays(cursor, 1);
@@ -144,54 +181,108 @@ export function getTier(level: number): Tier {
   return { name: 'Bronze', ring: '#b08d57' };
 }
 
+export type SignatureId = 'berserker' | 'momentum' | 'cheat-day' | 'deep-work' | 'equanimity' | 'patron';
+
+/** The level at which every attribute grants its one-of-a-kind signature perk. */
+export const SIGNATURE_LEVEL = 6;
+
 export interface Perk {
   level: number;
   name: string;
   description: string;
+  /** Present only on the signature perk — its effect is bespoke, not a stat tweak. */
+  signature?: SignatureId;
 }
+
+const GRACE_PERK_LEVELS = [3, 15];
+const XP_PERK_LEVEL = 10;
+const GOLD_PERK_LEVEL = 20;
+
+export const XP_PERK_BONUS = 0.1;
+export const GOLD_PERK_BONUS = 0.25;
+
+/** Signature perk tuning, kept together so the numbers are easy to find and adjust. */
+export const BERSERKER_INTERVAL = 7;
+export const BERSERKER_MULTIPLIER = 2;
+export const MOMENTUM_PER_STREAK_DAY = 0.02;
+export const MOMENTUM_CAP = 0.5;
+export const DEEP_WORK_SPILL = 0.1;
+export const EQUANIMITY_DECAY_REDUCTION = 0.25;
+export const PATRON_GOLD_BONUS = 0.25;
+export const CHEAT_DAY_RECHARGE_COMPLETIONS = 30;
 
 export const PERKS: Record<AttributeKey, Perk[]> = {
   STR: [
-    { level: 3, name: 'Steady Grip', description: 'Physical habits start to feel a little easier.' },
-    { level: 6, name: 'Iron Sinew', description: 'Your training compounds — every workout hits harder.' },
-    { level: 10, name: 'Battle-Hardened', description: 'Recognized as someone who trains seriously.' },
-    { level: 15, name: 'Juggernaut', description: 'Raw physical power, hard to knock down.' },
-    { level: 20, name: 'Legendary Warrior', description: 'Your strength has become the stuff of legend.' },
+    { level: 3, name: 'Steady Grip', description: '+1 day of grace before Strength quests decay.' },
+    {
+      level: SIGNATURE_LEVEL,
+      name: 'Berserker',
+      signature: 'berserker',
+      description: `Every ${BERSERKER_INTERVAL}th day of a streak, a Strength quest pays double XP.`,
+    },
+    { level: 10, name: 'Battle-Hardened', description: '+10% XP from Strength quests.' },
+    { level: 15, name: 'Juggernaut', description: '+1 more day of grace before Strength quests decay.' },
+    { level: 20, name: 'Legendary Warrior', description: '+25% gold from Strength quests.' },
   ],
   DEX: [
-    { level: 3, name: 'Light Feet', description: 'New skills click a little faster.' },
-    { level: 6, name: 'Quick Hands', description: 'Practiced reflexes start to show.' },
-    { level: 10, name: 'Practiced Precision', description: 'Consistency has sharpened your technique.' },
-    { level: 15, name: 'Shadow Step', description: 'You move through routines with total ease.' },
-    { level: 20, name: 'Master of Motion', description: 'Elite-level coordination and control.' },
+    { level: 3, name: 'Light Feet', description: '+1 day of grace before Dexterity quests decay.' },
+    {
+      level: SIGNATURE_LEVEL,
+      name: 'Momentum',
+      signature: 'momentum',
+      description: 'Dexterity quests pay +2% XP per day of streak, up to +50%.',
+    },
+    { level: 10, name: 'Practiced Precision', description: '+10% XP from Dexterity quests.' },
+    { level: 15, name: 'Shadow Step', description: '+1 more day of grace before Dexterity quests decay.' },
+    { level: 20, name: 'Master of Motion', description: '+25% gold from Dexterity quests.' },
   ],
   CON: [
-    { level: 3, name: 'Early Riser', description: 'Healthy routines are starting to stick.' },
-    { level: 6, name: 'Iron Stomach', description: 'Your habits have built real resilience.' },
-    { level: 10, name: 'Unshakable', description: 'Hard to knock off your routine now.' },
-    { level: 15, name: 'Bastion', description: 'A foundation of health others can lean on.' },
-    { level: 20, name: 'Undying Guardian', description: 'Endurance that borders on legendary.' },
+    { level: 3, name: 'Early Riser', description: '+1 day of grace before Constitution quests decay.' },
+    {
+      level: SIGNATURE_LEVEL,
+      name: 'Cheat Day',
+      signature: 'cheat-day',
+      description: `Spend a charge to forgive a whole day of Constitution quests — no decay, streaks intact. Recharges after ${CHEAT_DAY_RECHARGE_COMPLETIONS} completions.`,
+    },
+    { level: 10, name: 'Unshakable', description: '+10% XP from Constitution quests.' },
+    { level: 15, name: 'Bastion', description: '+1 more day of grace before Constitution quests decay.' },
+    { level: 20, name: 'Undying Guardian', description: '+25% gold from Constitution quests.' },
   ],
   INT: [
-    { level: 3, name: 'Curious Mind', description: 'Learning is starting to become a habit.' },
-    { level: 6, name: 'Well-Read', description: 'Your knowledge base is visibly growing.' },
-    { level: 10, name: 'Sharp Focus', description: 'Deep work comes easier than it used to.' },
-    { level: 15, name: 'Arcane Scholar', description: 'A genuine expert in the making.' },
-    { level: 20, name: 'Archmage', description: 'Mastery of knowledge few ever reach.' },
+    { level: 3, name: 'Curious Mind', description: '+1 day of grace before Intelligence quests decay.' },
+    {
+      level: SIGNATURE_LEVEL,
+      name: 'Deep Work',
+      signature: 'deep-work',
+      description: 'Intelligence quests also give every other attribute 10% of their XP.',
+    },
+    { level: 10, name: 'Sharp Focus', description: '+10% XP from Intelligence quests.' },
+    { level: 15, name: 'Arcane Scholar', description: '+1 more day of grace before Intelligence quests decay.' },
+    { level: 20, name: 'Archmage', description: '+25% gold from Intelligence quests.' },
   ],
   WIS: [
-    { level: 3, name: 'Mindful Pause', description: 'Reflection is becoming second nature.' },
-    { level: 6, name: 'Inner Calm', description: 'Discipline is steadying your days.' },
-    { level: 10, name: 'Clear Sight', description: 'Better judgment, born from practice.' },
-    { level: 15, name: 'Serene Discipline', description: 'Composure that rarely cracks.' },
-    { level: 20, name: 'Enlightened', description: 'A rare, hard-won clarity of mind.' },
+    { level: 3, name: 'Mindful Pause', description: '+1 day of grace before Wisdom quests decay.' },
+    {
+      level: SIGNATURE_LEVEL,
+      name: 'Equanimity',
+      signature: 'equanimity',
+      description: 'All decay, on every attribute, is reduced by 25%.',
+    },
+    { level: 10, name: 'Clear Sight', description: '+10% XP from Wisdom quests.' },
+    { level: 15, name: 'Serene Discipline', description: '+1 more day of grace before Wisdom quests decay.' },
+    { level: 20, name: 'Enlightened', description: '+25% gold from Wisdom quests.' },
   ],
   CHA: [
-    { level: 3, name: 'Warm Presence', description: 'Connection is coming more naturally.' },
-    { level: 6, name: 'Easy Rapport', description: 'People notice your growing confidence.' },
-    { level: 10, name: 'Silver Tongue', description: 'Your words carry real weight now.' },
-    { level: 15, name: 'Magnetic', description: 'A presence that draws people in.' },
-    { level: 20, name: 'Legendary Bard', description: 'Charisma that becomes the stuff of stories.' },
+    { level: 3, name: 'Warm Presence', description: '+1 day of grace before Charisma quests decay.' },
+    {
+      level: SIGNATURE_LEVEL,
+      name: 'Patron',
+      signature: 'patron',
+      description: 'Every quest, on every attribute, pays +25% gold.',
+    },
+    { level: 10, name: 'Silver Tongue', description: '+10% XP from Charisma quests.' },
+    { level: 15, name: 'Magnetic', description: '+1 more day of grace before Charisma quests decay.' },
+    { level: 20, name: 'Legendary Bard', description: '+25% gold from Charisma quests.' },
   ],
 };
 
@@ -209,10 +300,101 @@ export function getCrossedPerks(attribute: AttributeKey, oldLevel: number, newLe
   return PERKS[attribute].filter((p) => p.level > oldLevel && p.level <= newLevel);
 }
 
-export function isDecaying(habit: Habit): boolean {
-  return !habit.archived && habit.missedSinceCompletion > habit.graceDays;
+/** True once the attribute that owns this signature has reached its level. */
+export function hasSignature(attributes: Attributes, id: SignatureId): boolean {
+  for (const key of ATTRIBUTE_KEYS) {
+    const perk = PERKS[key].find((p) => p.signature === id);
+    if (perk) return attributes[key].level >= perk.level;
+  }
+  return false;
 }
 
-export function isAtRisk(habit: Habit): boolean {
-  return !habit.archived && habit.missedSinceCompletion > 0 && habit.missedSinceCompletion <= habit.graceDays;
+export interface AttributePerkBonuses {
+  graceDays: number;
+  xpMultiplier: number;
+  goldMultiplier: number;
+}
+
+/** The stackable, non-signature bonuses an attribute has unlocked at `level`. */
+export function getAttributeBonuses(attribute: AttributeKey, level: number): AttributePerkBonuses {
+  const unlocked = getUnlockedPerks(attribute, level);
+  return {
+    graceDays: unlocked.filter((p) => GRACE_PERK_LEVELS.includes(p.level)).length,
+    xpMultiplier: unlocked.some((p) => p.level === XP_PERK_LEVEL) ? 1 + XP_PERK_BONUS : 1,
+    goldMultiplier: unlocked.some((p) => p.level === GOLD_PERK_LEVEL) ? 1 + GOLD_PERK_BONUS : 1,
+  };
+}
+
+/** Grace days a habit effectively gets: its own setting plus perk bonuses. */
+export function getEffectiveGraceDays(habit: Habit, attributes: Attributes): number {
+  return habit.graceDays + getAttributeBonuses(habit.attribute, attributes[habit.attribute].level).graceDays;
+}
+
+export interface CompletionAward {
+  xp: number;
+  gold: number;
+  /** XP spilled to every other attribute by Deep Work. */
+  spilloverXp: number;
+  doubled: boolean;
+}
+
+/**
+ * XP and gold for completing `habit`, with every perk applied.
+ * `newStreak` is the streak the completion will produce (0 for an
+ * off-schedule completion, which earns rewards but no streak credit).
+ */
+export function getCompletionAward(habit: Habit, attributes: Attributes, newStreak: number): CompletionAward {
+  const bonuses = getAttributeBonuses(habit.attribute, attributes[habit.attribute].level);
+  let xpMultiplier = bonuses.xpMultiplier;
+  let doubled = false;
+
+  if (
+    habit.attribute === 'STR' &&
+    hasSignature(attributes, 'berserker') &&
+    newStreak > 0 &&
+    newStreak % BERSERKER_INTERVAL === 0
+  ) {
+    xpMultiplier *= BERSERKER_MULTIPLIER;
+    doubled = true;
+  }
+
+  if (habit.attribute === 'DEX' && hasSignature(attributes, 'momentum')) {
+    xpMultiplier *= 1 + Math.min(MOMENTUM_CAP, Math.max(0, newStreak) * MOMENTUM_PER_STREAK_DAY);
+  }
+
+  const xp = Math.max(1, Math.round(habit.xpReward * xpMultiplier));
+
+  let goldMultiplier = bonuses.goldMultiplier;
+  if (hasSignature(attributes, 'patron')) goldMultiplier *= 1 + PATRON_GOLD_BONUS;
+  const gold = Math.max(0, Math.round(xp * GOLD_PER_XP * goldMultiplier));
+
+  const spilloverXp =
+    habit.attribute === 'INT' && hasSignature(attributes, 'deep-work')
+      ? Math.floor(xp * DEEP_WORK_SPILL)
+      : 0;
+
+  return { xp, gold, spilloverXp, doubled };
+}
+
+/**
+ * XP lost per missed day past the grace period. Scales with the habit's own
+ * reward — a flat rate meant a 5 XP quest bled more than it could ever earn,
+ * while a 50 XP quest barely noticed.
+ */
+export function getDecayPerMiss(habit: Habit, attributes: Attributes): number {
+  let perMiss = habit.xpReward * DECAY_REWARD_FRACTION;
+  if (hasSignature(attributes, 'equanimity')) perMiss *= 1 - EQUANIMITY_DECAY_REDUCTION;
+  return Math.max(1, Math.round(perMiss));
+}
+
+export function isDecaying(habit: Habit, attributes?: Attributes): boolean {
+  if (habit.archived) return false;
+  const grace = attributes ? getEffectiveGraceDays(habit, attributes) : habit.graceDays;
+  return habit.missedSinceCompletion > grace;
+}
+
+export function isAtRisk(habit: Habit, attributes?: Attributes): boolean {
+  if (habit.archived) return false;
+  const grace = attributes ? getEffectiveGraceDays(habit, attributes) : habit.graceDays;
+  return habit.missedSinceCompletion > 0 && habit.missedSinceCompletion <= grace;
 }
