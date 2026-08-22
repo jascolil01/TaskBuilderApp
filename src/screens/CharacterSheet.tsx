@@ -17,6 +17,7 @@ import { ShareCard } from './ShareCard';
 
 export function CharacterSheet() {
   const character = useStore((s) => s.character);
+  const completions = useStore((s) => s.completions);
   const allHabits = useStore((s) => s.habits);
   const habits = useMemo(() => allHabits.filter((h) => !h.archived), [allHabits]);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -29,7 +30,10 @@ export function CharacterSheet() {
   );
   const tier = useMemo(() => getTier(level), [level]);
 
-  const totalXp = ATTRIBUTE_KEYS.reduce((sum, k) => sum + character.attributes[k].xp, 0);
+  // Lifetime XP actually earned, not the leftover XP sitting inside the
+  // current levels — that number resets on every level-up and made the
+  // label read far lower than what the player had earned.
+  const totalXp = useMemo(() => completions.reduce((sum, c) => sum + c.xpAwarded, 0), [completions]);
   const avgProgressPct = useMemo(() => {
     const sum = ATTRIBUTE_KEYS.reduce((acc, k) => {
       const a = character.attributes[k];

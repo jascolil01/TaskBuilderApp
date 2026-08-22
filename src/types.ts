@@ -25,12 +25,28 @@ export interface Habit {
   archived: boolean;
 }
 
+/**
+ * The parts of a habit's decay/streak bookkeeping that a completion
+ * overwrites. Snapshotted onto the completion so undo can restore the
+ * habit exactly, rather than guessing — guessing re-runs decay over days
+ * that were already charged.
+ */
+export interface HabitProgressSnapshot {
+  streak: number;
+  bestStreak: number;
+  missedSinceCompletion: number;
+  lastCompletedDate: string | null;
+  decayedThroughDate: string | null;
+}
+
 export interface CompletionEntry {
   id: string;
   habitId: string;
   date: string;
   xpAwarded: number;
   goldAwarded: number;
+  /** Absent on entries written before this was introduced. */
+  prevProgress?: HabitProgressSnapshot;
 }
 
 export interface CharacterState {

@@ -11,7 +11,7 @@ import type {
   ReminderSettings,
   Reward,
 } from './types';
-import { todayStr } from './lib/date';
+import { addDays, todayStr } from './lib/date';
 import {
   addXp,
   createAttributes,
@@ -23,6 +23,7 @@ import {
   STREAK_SAVE_COST,
 } from './lib/rpg';
 import { getBossForWeek, getBossGoldReward, getBossThreshold, getWeeklyXpEarned, getWeekStart } from './lib/boss';
+import { parseBackup } from './lib/backup';
 import { useToastStore } from './toastStore';
 
 function makeId(): string {
@@ -218,6 +219,13 @@ export const useStore = create<Store>()(
           date: today,
           xpAwarded: habit.xpReward,
           goldAwarded,
+          prevProgress: {
+            streak: habit.streak,
+            bestStreak: habit.bestStreak,
+            missedSinceCompletion: habit.missedSinceCompletion,
+            lastCompletedDate: habit.lastCompletedDate,
+            decayedThroughDate: habit.decayedThroughDate,
+          },
         };
 
         const oldLevel = state.character.attributes[habit.attribute].level;
@@ -262,33 +270,47 @@ export const useStore = create<Store>()(
         if (!habit || habit.lastCompletedDate !== today) return;
 
         const todaysEntry = [...state.completions].reverse().find((c) => c.habitId === id && c.date === today);
-        const remaining = state.completions.filter((c) => c.id !== todaysEntry?.id);
+        if (!todaysEntry) return;
+
+        // The gold from this completion may already be spent. Clamping the
+        // subtraction at zero would silently let the player keep that value,
+        // so refuse the undo instead of quietly minting gold.
+        if (state.character.gold < todaysEntry.goldAwarded) {
+          useToastStore
+            .getState()
+            .show(`Can't undo — you've already spent the ${todaysEntry.goldAwarded} gold this quest earned.`);
+          return;
+        }
+
+        const remaining = state.completions.filter((c) => c.id !== todaysEntry.id);
         const previous = [...remaining]
           .filter((c) => c.habitId === id)
           .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
 
+        // Restoring the snapshot is what keeps decay correct: rebuilding the
+        // dates by hand would move the decay cursor back over days that were
+        // already charged, and the next decay check would charge them again.
+        const restored: Partial<Habit> = todaysEntry.prevProgress
+          ? { ...todaysEntry.prevProgress }
+          : {
+              streak: Math.max(0, habit.streak - 1),
+              lastCompletedDate: previous?.date ?? null,
+              // No snapshot (entry predates them): park the decay cursor at
+              // yesterday so already-charged days can never be re-charged.
+              decayedThroughDate: addDays(today, -1),
+              missedSinceCompletion: 0,
+            };
+
         set((s) => ({
           character: {
             ...s.character,
-            gold: todaysEntry ? Math.max(0, s.character.gold - todaysEntry.goldAwarded) : s.character.gold,
-            attributes: todaysEntry
-              ? {
-                  ...s.character.attributes,
-                  [habit.attribute]: removeXp(s.character.attributes[habit.attribute], todaysEntry.xpAwarded),
-                }
-              : s.character.attributes,
+            gold: s.character.gold - todaysEntry.goldAwarded,
+            attributes: {
+              ...s.character.attributes,
+              [habit.attribute]: removeXp(s.character.attributes[habit.attribute], todaysEntry.xpAwarded),
+            },
           },
-          habits: s.habits.map((h) =>
-            h.id === id
-              ? {
-                  ...h,
-                  streak: Math.max(0, h.streak - 1),
-                  lastCompletedDate: previous?.date ?? null,
-                  decayedThroughDate: previous?.date ?? null,
-                  missedSinceCompletion: 0,
-                }
-              : h,
-          ),
+          habits: s.habits.map((h) => (h.id === id ? { ...h, ...restored } : h)),
           completions: remaining,
         }));
       },
@@ -409,37 +431,17 @@ export const useStore = create<Store>()(
       },
 
       importData: (json) => {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(json);
-        } catch {
-          return { ok: false, error: "Could not read this file — it isn't valid JSON." };
-        }
-        if (
-          !parsed ||
-          typeof parsed !== 'object' ||
-          !('character' in parsed) ||
-          !('habits' in parsed) ||
-          !Array.isArray((parsed as { habits: unknown }).habits)
-        ) {
-          return { ok: false, error: "This file doesn't look like a Questlog backup." };
-        }
-        const data = parsed as {
-          character: CharacterState;
-          habits: Habit[];
-          completions?: CompletionEntry[];
-          rewards?: Reward[];
-          redemptions?: RedemptionEntry[];
-          bossVictories?: BossVictory[];
-          settings?: ReminderSettings;
-        };
+        const result = parseBackup(json);
+        if (!result.ok) return { ok: false, error: result.error };
+
+        const { data } = result;
         set({
           character: data.character,
           habits: data.habits,
-          completions: Array.isArray(data.completions) ? data.completions : [],
-          rewards: Array.isArray(data.rewards) ? data.rewards : starterRewards(),
-          redemptions: Array.isArray(data.redemptions) ? data.redemptions : [],
-          bossVictories: Array.isArray(data.bossVictories) ? data.bossVictories : [],
+          completions: data.completions,
+          rewards: data.rewards,
+          redemptions: data.redemptions,
+          bossVictories: data.bossVictories,
           ...(data.settings ? { settings: data.settings } : {}),
         });
         return { ok: true };
