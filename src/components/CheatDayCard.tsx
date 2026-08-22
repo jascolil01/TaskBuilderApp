@@ -19,9 +19,9 @@ export function CheatDayCard() {
           <p className="font-display font-semibold text-gold-300">Cheat Day</p>
           <p className="mt-0.5 text-[11px] text-white/40">
             {usedToday
-              ? 'Today is forgiven — Constitution quests take no decay.'
+              ? 'Today is forgiven — no quest decays and every streak survives.'
               : cheatDay.charges > 0
-                ? 'Forgives a whole day of Constitution quests. Streaks survive.'
+                ? 'A full rest day — every quest due today is forgiven, streaks intact.'
                 : `Recharging — ${cheatDay.progressToNext}/${CHEAT_DAY_RECHARGE_COMPLETIONS} completions.`}
           </p>
         </div>

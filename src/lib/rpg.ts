@@ -242,7 +242,7 @@ export const PERKS: Record<AttributeKey, Perk[]> = {
       level: SIGNATURE_LEVEL,
       name: 'Cheat Day',
       signature: 'cheat-day',
-      description: `Spend a charge to forgive a whole day of Constitution quests — no decay, streaks intact. Recharges after ${CHEAT_DAY_RECHARGE_COMPLETIONS} completions.`,
+      description: `Spend a charge for a full rest day — every quest due that day is forgiven, with no decay and streaks intact. Recharges after ${CHEAT_DAY_RECHARGE_COMPLETIONS} completions.`,
     },
     { level: 10, name: 'Unshakable', description: '+10% XP from Constitution quests.' },
     { level: 15, name: 'Bastion', description: '+1 more day of grace before Constitution quests decay.' },

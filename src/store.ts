@@ -192,7 +192,9 @@ export const useStore = create<Store>()(
             const { habit: updated, xpLoss } = processHabitDecay(h, today, {
               graceDays,
               perMiss: getDecayPerMiss(h, baseAttributes),
-              forgivenDates: h.attribute === 'CON' ? cheatDates : undefined,
+              // Constitution earns the perk, but a rest day is a rest day —
+              // it forgives every quest that was due, not just CON ones.
+              forgivenDates: cheatDates,
             });
 
             if (xpLoss > 0) {
@@ -234,7 +236,7 @@ export const useStore = create<Store>()(
         if (!cheatDay.unlocked || cheatDay.charges < 1) return;
         if (cheatDay.usedDates.includes(today)) return;
 
-        useToastStore.getState().show('🍰 Cheat Day spent — Constitution quests are forgiven today.');
+        useToastStore.getState().show('🍰 Cheat Day spent — every quest is forgiven today. Rest up.');
         set((s) => ({
           character: {
             ...s.character,
