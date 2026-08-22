@@ -1,12 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
 import type { AttributeKey } from '../types';
 import { ATTRIBUTE_INFO, ATTRIBUTE_KEYS, getCharacterClass, getCharacterLevel, getTier, xpToNextLevel } from '../lib/rpg';
 import { getNextPerk, getUnlockedPerks, isAtRisk, isDecaying } from '../lib/rpg';
 import { XpBar } from '../components/XpBar';
 import { Avatar } from '../components/Avatar';
-import { WalkingCharacter } from '../components/WalkingCharacter';
 import { BossBattleCard } from '../components/BossBattleCard';
+
+// Three.js is a heavy dependency (~500KB) — load it only when this screen
+// actually renders the 3D widget, not as part of the app's initial bundle.
+const WalkingCharacter3D = lazy(() =>
+  import('../components/WalkingCharacter3D').then((m) => ({ default: m.WalkingCharacter3D })),
+);
 import { Settings } from './Settings';
 import { ShareCard } from './ShareCard';
 
@@ -104,7 +109,9 @@ export function CharacterSheet() {
         </div>
       </div>
 
-      <WalkingCharacter attribute={dominantAttribute} />
+      <Suspense fallback={<div className="h-40 w-full rounded-xl border border-white/10 bg-ink-950/50" />}>
+        <WalkingCharacter3D attribute={dominantAttribute} />
+      </Suspense>
 
       <BossBattleCard />
 
