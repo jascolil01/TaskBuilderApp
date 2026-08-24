@@ -26,11 +26,11 @@ interface Palette {
 
 const PALETTES: Record<AttributeKey, Palette> = {
   STR: { garment: 0xb3372c, trim: 0xe8b45a, skin: 0xd9a279, leather: 0x6b4630, metal: 0x9fa8b4, dark: 0x2c2530, glow: 0xff8a5c },
-  DEX: { garment: 0x4a9d5f, trim: 0xd6c48a, skin: 0xd9a279, leather: 0x6b4630, metal: 0x9fa8b4, dark: 0x24302a, glow: 0x8ef2a8 },
+  DEX: { garment: 0x4a9d5f, trim: 0xd6c48a, skin: 0xd9a279, leather: 0x6b4630, metal: 0x9fa8b4, dark: 0x24302a, glow: 0x4fd98a },
   CON: { garment: 0xc9922b, trim: 0xf0dca4, skin: 0xd9a279, leather: 0x5c3f2a, metal: 0x8f98a6, dark: 0x33291c, glow: 0xffd98a },
-  INT: { garment: 0x3f8fd6, trim: 0xa9d6ff, skin: 0xd9a279, leather: 0x5a4a6b, metal: 0x9fa8b4, dark: 0x1f2a3d, glow: 0x9fe0ff },
-  WIS: { garment: 0x9b7fd4, trim: 0xe6dcff, skin: 0xd9a279, leather: 0x584a72, metal: 0xc9c2dd, dark: 0x2a2440, glow: 0xd9c8ff },
-  CHA: { garment: 0xe07bb0, trim: 0xffd9ec, skin: 0xd9a279, leather: 0x7a4b5e, metal: 0xd9b06a, dark: 0x3a2233, glow: 0xffb0d8 },
+  INT: { garment: 0x3f8fd6, trim: 0xa9d6ff, skin: 0xd9a279, leather: 0x5a4a6b, metal: 0x9fa8b4, dark: 0x1f2a3d, glow: 0x4fb8ff },
+  WIS: { garment: 0x9b7fd4, trim: 0xe6dcff, skin: 0xd9a279, leather: 0x584a72, metal: 0xc9c2dd, dark: 0x2a2440, glow: 0xb89aff },
+  CHA: { garment: 0xe07bb0, trim: 0xffd9ec, skin: 0xd9a279, leather: 0x7a4b5e, metal: 0xd9b06a, dark: 0x3a2233, glow: 0xff7ec0 },
 };
 
 /** One material per palette slot, shared across every mesh that uses it. */
@@ -45,7 +45,7 @@ function buildMaterials(p: Palette) {
     glow: new THREE.MeshStandardMaterial({
       color: p.glow,
       emissive: p.glow,
-      emissiveIntensity: 0.9,
+      emissiveIntensity: 0.5,
       roughness: 0.3,
     }),
   };
@@ -123,6 +123,44 @@ function buildHood(mat: THREE.Material) {
   return hood;
 }
 
+interface ArmHold {
+  shoulderX: number;
+  shoulderZ: number;
+  elbowX: number;
+}
+
+/**
+ * Arms that carry their kit in a fixed ready pose instead of swinging with the
+ * walk. A sword hanging off a straight arm reads as luggage; brought up across
+ * the body it reads as a warrior.
+ */
+const KIT_HOLDS: Partial<Record<AttributeKey, { right?: ArmHold; left?: ArmHold }>> = {
+  STR: { right: { shoulderX: -0.38, shoulderZ: 0.34, elbowX: -1.3 } },
+  CON: { left: { shoulderX: -0.3, shoulderZ: -0.44, elbowX: -1.3 } },
+  WIS: { right: { shoulderX: -0.34, shoulderZ: 0.3, elbowX: -1.45 } },
+  // A staff and a bow are carried, not brandished — the arm stays low, but it
+  // still has to stop swinging, or the shaft scythes around like a metronome.
+  INT: { right: { shoulderX: -0.14, shoulderZ: 0.26, elbowX: -0.22 } },
+  DEX: { right: { shoulderX: -0.18, shoulderZ: 0.58, elbowX: -0.26 } },
+};
+
+/**
+ * A child of the hand whose orientation cancels everything the shoulder and
+ * elbow did, so kit can be aimed in the character's own frame — +Y up, +Z the
+ * way they face — instead of in whatever frame the elbow happened to leave
+ * behind. Without this, "point the blade forward" means a different local
+ * rotation for every arm pose, which is how the sword ended up aimed backwards.
+ */
+function makeGrip(hand: THREE.Group, root: THREE.Object3D) {
+  root.updateMatrixWorld(true);
+  const grip = new THREE.Group();
+  const q = new THREE.Quaternion();
+  hand.getWorldQuaternion(q);
+  grip.quaternion.copy(q.invert());
+  hand.add(grip);
+  return grip;
+}
+
 interface Kit {
   /** Called every frame with the elapsed time, for kit that glows or floats. */
   tick?: (t: number) => void;
@@ -137,20 +175,24 @@ function buildKit(
   m: Materials,
   head: THREE.Group,
   torso: THREE.Group,
-  right: ReturnType<typeof buildArm>,
-  left: ReturnType<typeof buildArm>,
+  rightGrip: THREE.Group,
+  leftGrip: THREE.Group,
 ): Kit {
   switch (attribute) {
     case 'STR': {
       // Broadsword, gripped point-up, plus pauldrons to widen the silhouette.
-      const sword = pivot(0.08, 0.02, 0.04);
-      sword.add(box(0.12, 1.12, 0.045, m.metal, 0, 0.68, 0));
-      sword.add(box(0.1, 0.16, 0.05, m.metal, 0, 1.31, 0));
-      sword.add(box(0.34, 0.07, 0.09, m.trim, 0, 0.14, 0));
-      sword.add(box(0.075, 0.22, 0.075, m.leather, 0, 0.01, 0));
-      sword.rotation.z = 0.34;
-      sword.rotation.x = -0.38;
-      right.hand.add(sword);
+      const sword = pivot(0.02, 0.0, 0.06);
+      // The blade's flat lies perpendicular to X so it faces the camera at the
+      // three-quarter view; edge-on it just read as a grey pole. The crossguard
+      // runs the other way, across the flat, as a real one does.
+      sword.add(box(0.05, 0.72, 0.14, m.metal, 0, 0.49, 0));
+      sword.add(box(0.055, 0.14, 0.12, m.metal, 0, 0.91, 0));
+      sword.add(box(0.1, 0.075, 0.38, m.trim, 0, 0.14, 0));
+      sword.add(box(0.08, 0.22, 0.085, m.leather, 0, 0.01, 0));
+      sword.add(box(0.1, 0.08, 0.1, m.trim, 0, -0.13, 0));
+      sword.rotation.x = 0.7;
+      sword.rotation.z = -0.16;
+      rightGrip.add(sword);
       const pauldron = (x: number) => {
         const p = box(0.3, 0.18, 0.32, m.metal, x, 0.64, 0);
         p.rotation.z = x > 0 ? -0.25 : 0.25;
@@ -177,21 +219,22 @@ function buildKit(
 
       // Two straight limbs and a string read as a bow at this scale; a smooth
       // torus just looked like a hoop hanging off the hand.
-      const bow = pivot(0.15, 0.04, 0.02);
+      const bow = pivot(0.19, 0.02, -0.1);
       const limb = (dir: 1 | -1) => {
-        const l = box(0.055, 0.46, 0.055, m.leather, 0, dir * 0.25, -0.09);
+        const l = box(0.06, 0.52, 0.06, m.leather, 0, dir * 0.28, -0.1);
         l.rotation.x = dir * -0.38;
         return l;
       };
       bow.add(limb(1), limb(-1));
       bow.add(box(0.08, 0.2, 0.1, m.trim));
-      bow.add(box(0.016, 0.9, 0.016, m.trim, 0, 0, -0.185));
-      right.hand.add(bow);
+      bow.rotation.x = -0.16;
+      bow.add(box(0.016, 1.0, 0.016, m.trim, 0, 0, -0.205));
+      rightGrip.add(bow);
       return {};
     }
     case 'CON': {
       // Tower shield on the off arm, helm with a crest.
-      const shield = pivot(-0.12, 0.06, 0.1);
+      const shield = pivot(-0.04, 0.0, 0.16);
       const face = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.07, 8), m.metal);
       face.rotation.x = Math.PI / 2;
       shield.add(face);
@@ -201,8 +244,8 @@ function buildKit(
       boss.rotation.x = Math.PI / 2;
       boss.position.z = 0.05;
       shield.add(boss);
-      shield.rotation.y = 0.18;
-      left.hand.add(shield);
+      shield.rotation.y = 0.12;
+      leftGrip.add(shield);
       head.add(box(0.52, 0.16, 0.52, m.metal, 0, 0.4, 0));
       head.add(box(0.08, 0.2, 0.44, m.trim, 0, 0.54, 0));
       torso.add(box(0.64, 0.1, 0.4, m.metal, 0, 0.5, 0));
@@ -224,17 +267,18 @@ function buildKit(
       robe.castShadow = true;
       torso.add(robe);
 
-      const staff = pivot(0.19, 0.34, 0.07);
-      staff.add(new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 1.72, 8), m.leather));
-      const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.16), m.glow);
-      crystal.position.y = 0.94;
+      const staff = pivot(0.21, 0.24, -0.05);
+      staff.add(new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 1.46, 8), m.leather));
+      const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.13), m.glow);
+      crystal.position.y = 0.8;
       staff.add(crystal);
-      staff.rotation.z = 0.16;
-      right.hand.add(staff);
+      staff.rotation.z = 0.02;
+      staff.rotation.x = -0.42;
+      rightGrip.add(staff);
       return {
         tick: (t) => {
           crystal.rotation.y = t * 1.4;
-          m.glow.emissiveIntensity = 0.75 + Math.sin(t * 2.6) * 0.3;
+          m.glow.emissiveIntensity = 0.45 + Math.sin(t * 2.6) * 0.2;
         },
       };
     }
@@ -246,12 +290,12 @@ function buildKit(
       head.add(halo);
       head.add(buildHood(m.garment));
 
-      const tome = pivot(0.12, 0.04, 0.12);
+      const tome = pivot(0.0, 0.02, 0.14);
       tome.add(box(0.32, 0.38, 0.1, m.leather));
       tome.add(box(0.27, 0.34, 0.12, m.trim));
       tome.add(box(0.3, 0.05, 0.13, m.glow, 0, 0.02, 0));
-      tome.rotation.set(0.35, 0.2, 0.1);
-      right.hand.add(tome);
+      tome.rotation.set(-0.95, 0.25, 0.1);
+      rightGrip.add(tome);
       const robe = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.46, 0.5, 10), m.garment);
       robe.position.y = 0.08;
       robe.castShadow = true;
@@ -261,7 +305,7 @@ function buildKit(
         tick: (t) => {
           halo.position.y = 0.68 + Math.sin(t * 2) * 0.04;
           halo.rotation.z = t * 0.8;
-          m.glow.emissiveIntensity = 0.7 + Math.sin(t * 2) * 0.25;
+          m.glow.emissiveIntensity = 0.42 + Math.sin(t * 2) * 0.16;
         },
       };
     }
@@ -276,12 +320,12 @@ function buildKit(
 
       const lute = pivot(0.06, 0.34, 0.24);
       const bowl = new THREE.Mesh(new THREE.SphereGeometry(0.19, 12, 10), m.leather);
-      bowl.scale.set(1.1, 1.2, 0.6);
+      bowl.scale.set(1.3, 1.4, 0.62);
       lute.add(bowl);
-      lute.add(box(0.075, 0.52, 0.055, m.trim, 0, 0.37, 0));
-      lute.add(box(0.13, 0.11, 0.08, m.dark, 0, 0.66, 0));
-      lute.rotation.set(0.15, -0.25, 1.05);
-      lute.position.set(-0.02, 0.28, 0.26);
+      lute.add(box(0.085, 0.62, 0.06, m.leather, 0, 0.44, 0));
+      lute.add(box(0.14, 0.12, 0.085, m.trim, 0, 0.8, 0));
+      lute.rotation.set(0.12, -0.3, 0.82);
+      lute.position.set(0.02, 0.32, 0.28);
       torso.add(lute);
 
       const soundHole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.04, 12), m.glow);
@@ -290,7 +334,7 @@ function buildKit(
       lute.add(soundHole);
       return {
         tick: (t) => {
-          m.glow.emissiveIntensity = 0.7 + Math.sin(t * 4.2) * 0.35;
+          m.glow.emissiveIntensity = 0.5 + Math.sin(t * 4.2) * 0.2;
         },
       };
     }
@@ -321,6 +365,18 @@ function buildCharacter(attribute: AttributeKey) {
   arms.left.shoulder.rotation.z = -0.13;
   arms.right.shoulder.rotation.z = 0.13;
 
+  // Lock any carrying arm into its ready pose BEFORE the grips are measured,
+  // so each grip cancels the pose its own arm actually ended up in.
+  const holds = KIT_HOLDS[attribute] ?? {};
+  const held = { left: !!holds.left, right: !!holds.right };
+  for (const side of ['left', 'right'] as const) {
+    const hold = holds[side];
+    if (!hold) continue;
+    arms[side].shoulder.rotation.x = hold.shoulderX;
+    arms[side].shoulder.rotation.z = hold.shoulderZ;
+    arms[side].elbow.rotation.x = hold.elbowX;
+  }
+
   torso.add(box(0.2, 0.12, 0.2, m.skin, 0, 0.72, 0));
 
   const head = pivot(0, 0.76, 0);
@@ -335,9 +391,10 @@ function buildCharacter(attribute: AttributeKey) {
   const cape = buildCape(m);
   torso.add(cape.root);
 
-  const kit = buildKit(attribute, m, head, torso, arms.right, arms.left);
+  const grips = { right: makeGrip(arms.right.hand, root), left: makeGrip(arms.left.hand, root) };
+  const kit = buildKit(attribute, m, head, torso, grips.right, grips.left);
 
-  return { root, body, legs, arms, torso, head, cape, kit, materials: m };
+  return { root, body, legs, arms, torso, head, cape, kit, held, materials: m };
 }
 
 /** A soft radial blob that sits under the feet as a grounding aura. */
@@ -425,7 +482,7 @@ export function WalkingCharacter3D({ attribute }: { attribute: AttributeKey }) {
     const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
     const clock = new THREE.Clock();
-    const PATROL_RANGE = 1.45;
+    const PATROL_RANGE = 1.28;
     // Three-quarter view: mostly facing the way they're walking, but angled
     // toward the viewer so you can still see the face and the kit.
     const FACING = (Math.PI / 2) * 0.62;
@@ -444,10 +501,15 @@ export function WalkingCharacter3D({ attribute }: { attribute: AttributeKey }) {
       rig.legs.left.knee.rotation.x = p.leftKnee;
       rig.legs.right.knee.rotation.x = p.rightKnee;
 
-      rig.arms.left.shoulder.rotation.x = p.leftShoulder;
-      rig.arms.right.shoulder.rotation.x = p.rightShoulder;
-      rig.arms.left.elbow.rotation.x = p.leftElbow;
-      rig.arms.right.elbow.rotation.x = p.rightElbow;
+      // An arm carrying kit holds its pose; only free arms swing.
+      if (!rig.held.left) {
+        rig.arms.left.shoulder.rotation.x = p.leftShoulder;
+        rig.arms.left.elbow.rotation.x = p.leftElbow;
+      }
+      if (!rig.held.right) {
+        rig.arms.right.shoulder.rotation.x = p.rightShoulder;
+        rig.arms.right.elbow.rotation.x = p.rightElbow;
+      }
 
       rig.body.position.y = p.bob;
       rig.torso.rotation.y = p.torsoTwist;
