@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useStore } from '../store';
 import { getBossForWeek, getBossThreshold, getWeeklyXpEarned, getWeekEnd, getWeekStart } from '../lib/boss';
 import { parseDate, todayStr } from '../lib/date';
+import { isWeekOnVacation } from '../lib/vacation';
 import { BossMonster } from './BossMonster';
 import { XpBar } from './XpBar';
 
@@ -10,6 +11,7 @@ export function BossBattleCard() {
   const completions = useStore((s) => s.completions);
   const bossVictories = useStore((s) => s.bossVictories);
   const bossWeek = useStore((s) => s.bossWeek);
+  const vacations = useStore((s) => s.vacations);
 
   const today = todayStr();
   const weekStart = getWeekStart(today);
@@ -26,8 +28,28 @@ export function BossBattleCard() {
   );
   const xpEarned = useMemo(() => getWeeklyXpEarned(completions, weekStart), [completions, weekStart]);
   const victory = bossVictories.find((v) => v.weekStart === weekStart);
+  const onVacation = isWeekOnVacation(vacations, weekStart);
   const pct = Math.min(100, Math.round((xpEarned / threshold) * 100));
   const daysLeft = Math.max(0, Math.round((parseDate(weekEnd).getTime() - parseDate(today).getTime()) / 86400000));
+
+  // No boss stalks a week you were away for — showing an unbeatable bar would
+  // just read as a loss you can't do anything about.
+  if (onVacation && !victory) {
+    return (
+      <div className="parchment-border rounded-xl bg-ink-800/50 p-4">
+        <div className="flex items-center gap-3 opacity-50 grayscale">
+          <BossMonster color={boss.color} size={48} />
+          <div className="min-w-0 flex-1">
+            <p className="font-display font-semibold" style={{ color: boss.color }}>
+              {boss.name}
+            </p>
+            <p className="text-[11px] text-white/40">Sleeping — no boss while you're on vacation</p>
+          </div>
+          <span className="shrink-0 text-lg">💤</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="parchment-border rounded-xl bg-ink-800/50 p-4">

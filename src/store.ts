@@ -13,6 +13,7 @@ import type {
   RedemptionEntry,
   ReminderSettings,
   Reward,
+  Vacation,
 } from './types';
 import { addDays, todayStr } from './lib/date';
 import {
@@ -44,6 +45,12 @@ import {
   type RewardTier,
   type ShopItemId,
 } from './lib/shop';
+import {
+  getActiveVacation,
+  getVacationDates,
+  isWeekOnVacation,
+  validateVacation,
+} from './lib/vacation';
 import { parseBackup } from './lib/backup';
 import { useToastStore } from './toastStore';
 
@@ -101,6 +108,7 @@ interface Store {
   redemptions: RedemptionEntry[];
   bossVictories: BossVictory[];
   bossWeek: BossWeek | null;
+  vacations: Vacation[];
   settings: ReminderSettings;
 
   setCharacterName: (name: string) => void;
@@ -132,6 +140,10 @@ interface Store {
   setCosmetic: (kind: 'title' | 'ring', id: string | null) => void;
   claimBossVictory: () => void;
 
+  scheduleVacation: (startDate: string, endDate: string) => { ok: boolean; error?: string };
+  cancelVacation: (id: string) => void;
+  endVacationEarly: () => void;
+
   resetAll: () => void;
   exportData: () => string;
   importData: (json: string) => { ok: boolean; error?: string };
@@ -162,6 +174,7 @@ function createInitialState() {
     redemptions: [] as RedemptionEntry[],
     bossVictories: [] as BossVictory[],
     bossWeek: null as BossWeek | null,
+    vacations: [] as Vacation[],
   };
 }
 
@@ -206,7 +219,12 @@ export const useStore = create<Store>()(
         set((state) => {
           const today = todayStr();
           const baseAttributes = state.character.attributes;
-          const cheatDates = state.character.cheatDay.usedDates;
+          // A vacation is simply a range of forgiven days, so it rides the
+          // same path the Cheat Day already uses.
+          const forgivenDates = [
+            ...state.character.cheatDay.usedDates,
+            ...getVacationDates(state.vacations),
+          ];
           let attributes = { ...baseAttributes };
           let streakSaves = state.character.streakSaves;
           let changed = false;
@@ -222,7 +240,7 @@ export const useStore = create<Store>()(
               perMiss: getDecayPerMiss(h, baseAttributes),
               // Constitution earns the perk, but a rest day is a rest day —
               // it forgives every quest that was due, not just CON ones.
-              forgivenDates: cheatDates,
+              forgivenDates,
             });
 
             if (xpLoss > 0) {
@@ -698,6 +716,9 @@ export const useStore = create<Store>()(
         const today = todayStr();
         const weekStart = getWeekStart(today);
         if (state.bossVictories.some((v) => v.weekStart === weekStart)) return;
+        // A week you were away for has no boss to defeat, so there is nothing
+        // to claim and nothing missed.
+        if (isWeekOnVacation(state.vacations, weekStart)) return;
 
         // Use the target frozen at the start of the week; fall back to a live
         // figure only if this is the very first check of a fresh week.
@@ -727,13 +748,51 @@ export const useStore = create<Store>()(
         }));
       },
 
+      scheduleVacation: (startDate, endDate) => {
+        const state = get();
+        const check = validateVacation(state.vacations, startDate, endDate, todayStr());
+        if (!check.ok) return { ok: false, error: check.error };
+
+        const vacation: Vacation = {
+          id: makeId(),
+          startDate,
+          endDate,
+          createdAt: new Date().toISOString(),
+        };
+        useToastStore.getState().show('🏝️ Vacation scheduled — your streaks are safe.');
+        set((s) => ({ vacations: [...s.vacations, vacation] }));
+        return { ok: true };
+      },
+
+      cancelVacation: (id) => {
+        const state = get();
+        const vacation = state.vacations.find((v) => v.id === id);
+        // Only a trip that hasn't begun can be cancelled outright; once it has
+        // started it is ended early instead, so it still counts for the year.
+        if (!vacation || vacation.startDate <= todayStr()) return;
+        set((s) => ({ vacations: s.vacations.filter((v) => v.id !== id) }));
+      },
+
+      endVacationEarly: () => {
+        const today = todayStr();
+        const state = get();
+        const active = getActiveVacation(state.vacations, today);
+        if (!active) return;
+
+        useToastStore.getState().show('🏠 Welcome back — quests resume tomorrow.');
+        set((s) => ({
+          vacations: s.vacations.map((v) => (v.id === active.id ? { ...v, endedEarlyOn: today } : v)),
+        }));
+      },
+
       resetAll: () => set(createInitialState()),
 
       exportData: () => {
-        const { character, habits, completions, rewards, redemptions, bossVictories, bossWeek, settings } = get();
+        const { character, habits, completions, rewards, redemptions, bossVictories, bossWeek, vacations, settings } =
+          get();
         return JSON.stringify(
           {
-            version: 3,
+            version: 4,
             exportedAt: new Date().toISOString(),
             character,
             habits,
@@ -742,6 +801,7 @@ export const useStore = create<Store>()(
             redemptions,
             bossVictories,
             bossWeek,
+            vacations,
             settings,
           },
           null,
@@ -762,6 +822,7 @@ export const useStore = create<Store>()(
           redemptions: data.redemptions,
           bossVictories: data.bossVictories,
           bossWeek: null,
+          vacations: data.vacations,
           ...(data.settings ? { settings: data.settings } : {}),
         });
         return { ok: true };
@@ -769,10 +830,10 @@ export const useStore = create<Store>()(
     }),
     {
       name: 'questlog-rpg-storage',
-      version: 3,
+      version: 4,
       migrate: (persisted, fromVersion) => {
         const state = persisted as Partial<Store> & { character?: Partial<CharacterState> };
-        if (fromVersion >= 3 || !state?.character) return state as Store;
+        if (fromVersion >= 4 || !state?.character) return state as Store;
 
         // v1 had no lifetimeXp and no cheat-day state. Seed lifetime XP from
         // the completion log so existing players keep the progress they
@@ -813,6 +874,8 @@ export const useStore = create<Store>()(
             };
           }),
           bossWeek: null,
+          // v4: vacations.
+          vacations: Array.isArray(state.vacations) ? state.vacations : [],
         } as Store;
       },
     },

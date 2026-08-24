@@ -7,6 +7,7 @@ import { XpBar } from '../components/XpBar';
 import { Avatar } from '../components/Avatar';
 import { BossBattleCard } from '../components/BossBattleCard';
 import { CheatDayCard } from '../components/CheatDayCard';
+import { VacationCard } from '../components/VacationCard';
 import { COSMETIC_RINGS, COSMETIC_TITLES } from '../lib/shop';
 
 // Three.js is a heavy dependency (~500KB) — load it only when this screen
@@ -123,6 +124,8 @@ export function CharacterSheet() {
       <Suspense fallback={<div className="h-40 w-full rounded-xl border border-white/10 bg-ink-950/50" />}>
         <WalkingCharacter3D attribute={dominantAttribute} />
       </Suspense>
+
+      <VacationCard />
 
       <BossBattleCard />
 

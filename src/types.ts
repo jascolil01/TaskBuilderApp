@@ -104,6 +104,21 @@ export interface CharacterState {
   lastDecayCheck: string;
 }
 
+/**
+ * A planned break. Every day it covers is forgiven by the decay pass, so
+ * streaks survive a trip. Limited to two per calendar year and fourteen
+ * days each.
+ */
+export interface Vacation {
+  id: string;
+  startDate: string;
+  /** Inclusive. */
+  endDate: string;
+  createdAt: string;
+  /** Set when the trip is cut short; the vacation then covers only up to this day. */
+  endedEarlyOn?: string;
+}
+
 /** The boss target is frozen at the start of each week so mid-week habit edits can't move the bar. */
 export interface BossWeek {
   weekStart: string;

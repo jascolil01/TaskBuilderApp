@@ -11,6 +11,7 @@ import type {
   RedemptionEntry,
   ReminderSettings,
   Reward,
+  Vacation,
 } from '../types';
 import { ATTRIBUTE_KEYS, SIGNATURE_LEVEL } from './rpg';
 import {
@@ -21,6 +22,7 @@ import {
   type RewardTier,
 } from './shop';
 import { todayStr } from './date';
+import { daysInclusive, MAX_VACATION_DAYS } from './vacation';
 
 export interface BackupData {
   character: CharacterState;
@@ -29,6 +31,7 @@ export interface BackupData {
   rewards: Reward[];
   redemptions: RedemptionEntry[];
   bossVictories: BossVictory[];
+  vacations: Vacation[];
   settings?: ReminderSettings;
 }
 
@@ -244,6 +247,31 @@ function parseBossVictory(raw: unknown): BossVictory | null {
   };
 }
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseVacation(raw: unknown): Vacation | null {
+  if (!isObj(raw)) return null;
+  if (typeof raw.id !== 'string') return null;
+  const { startDate, endDate } = raw;
+  if (typeof startDate !== 'string' || !DATE_RE.test(startDate)) return null;
+  if (typeof endDate !== 'string' || !DATE_RE.test(endDate)) return null;
+  if (endDate < startDate) return null;
+  // Reject a hand-edited range longer than the rules allow, rather than
+  // importing a vacation that would forgive months of decay.
+  if (daysInclusive(startDate, endDate) > MAX_VACATION_DAYS) return null;
+
+  const endedEarlyOn =
+    typeof raw.endedEarlyOn === 'string' && DATE_RE.test(raw.endedEarlyOn) ? raw.endedEarlyOn : undefined;
+
+  return {
+    id: raw.id,
+    startDate,
+    endDate,
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
+    ...(endedEarlyOn ? { endedEarlyOn } : {}),
+  };
+}
+
 function parseSettings(raw: unknown): ReminderSettings | undefined {
   if (!isObj(raw)) return undefined;
   const time = typeof raw.time === 'string' && /^\d{2}:\d{2}$/.test(raw.time) ? raw.time : '19:00';
@@ -304,6 +332,7 @@ export function parseBackup(json: string): ParseResult {
       rewards: parseList(parsed.rewards, parseReward),
       redemptions: parseList(parsed.redemptions, parseRedemption),
       bossVictories: parseList(parsed.bossVictories, parseBossVictory),
+      vacations: parseList(parsed.vacations, parseVacation),
       settings: parseSettings(parsed.settings),
     },
   };
