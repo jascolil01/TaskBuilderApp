@@ -55,10 +55,14 @@ export function walkPose(phase: number): WalkPose {
   };
 }
 
-/** Each cape panel lags a little further behind the one above it. */
+/**
+ * Each cape panel lags a little further behind the one above it. The swing is
+ * capped, or a five-panel cloak flares out sideways like a tail.
+ */
 export function capeJoint(phase: number, index: number): { x: number; z: number } {
+  const amplitude = Math.min(0.17, 0.07 + index * 0.04);
   return {
-    x: 0.12 + Math.sin(phase - index * 0.7) * (0.07 + index * 0.04),
+    x: 0.12 + Math.sin(phase - index * 0.7) * amplitude,
     z: Math.sin(phase * 0.5 - index * 0.5) * 0.05,
   };
 }

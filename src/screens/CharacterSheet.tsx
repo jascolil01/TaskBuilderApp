@@ -122,7 +122,7 @@ export function CharacterSheet() {
       </div>
 
       <Suspense fallback={<div className="h-40 w-full rounded-xl border border-white/10 bg-ink-950/50" />}>
-        <WalkingCharacter3D attribute={dominantAttribute} />
+        <WalkingCharacter3D attribute={dominantAttribute} equipped={character.cosmetics.equippedGear} />
       </Suspense>
 
       <VacationCard />

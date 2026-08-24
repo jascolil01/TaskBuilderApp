@@ -22,6 +22,7 @@ import {
   type RewardTier,
 } from './shop';
 import { todayStr } from './date';
+import { isValidGearId, withEquipped } from './gear';
 import { daysInclusive, MAX_VACATION_DAYS } from './vacation';
 
 export interface BackupData {
@@ -90,7 +91,14 @@ function parseInventory(raw: unknown): Inventory {
 }
 
 function parseCosmetics(raw: unknown): Cosmetics {
-  const empty: Cosmetics = { unlockedTitles: [], unlockedRings: [], activeTitle: null, activeRing: null };
+  const empty: Cosmetics = {
+    unlockedTitles: [],
+    unlockedRings: [],
+    activeTitle: null,
+    activeRing: null,
+    unlockedGear: [],
+    equippedGear: [],
+  };
   if (!isObj(raw)) return empty;
   // Only ids that exist in the current catalog survive, so a hand-edited
   // backup can't inject an unknown title or ring.
@@ -104,11 +112,21 @@ function parseCosmetics(raw: unknown): Cosmetics {
   const active = (v: unknown, owned: string[]) =>
     typeof v === 'string' && owned.includes(v) ? v : null;
 
+  // Same rule for gear: unknown ids are dropped, and you can't wear a piece
+  // the backup doesn't also claim you own.
+  const unlockedGear = Array.isArray(raw.unlockedGear) ? raw.unlockedGear.filter(isValidGearId) : [];
+  const equippedGear = Array.isArray(raw.equippedGear)
+    ? raw.equippedGear.filter((id): id is string => isValidGearId(id) && unlockedGear.includes(id))
+    : [];
+
   return {
     unlockedTitles,
     unlockedRings,
     activeTitle: active(raw.activeTitle, unlockedTitles),
     activeRing: active(raw.activeRing, unlockedRings),
+    unlockedGear,
+    // One piece per slot per class, whatever the file says.
+    equippedGear: equippedGear.reduce<string[]>((acc, id) => withEquipped(acc, id), []),
   };
 }
 

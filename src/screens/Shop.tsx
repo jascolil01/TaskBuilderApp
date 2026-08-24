@@ -9,9 +9,11 @@ import {
   REWARD_TIERS,
   SHOP_ITEMS,
 } from '../lib/shop';
+import { getCharacterClass } from '../lib/rpg';
+import { getGearForClass, SLOT_LABELS, type GearItem } from '../lib/gear';
 import { AddEditReward } from './AddEditReward';
 
-type Tab = 'rewards' | 'items' | 'cosmetics';
+type Tab = 'rewards' | 'items' | 'gear' | 'cosmetics';
 
 export function Shop() {
   const gold = useStore((s) => s.character.gold);
@@ -25,6 +27,9 @@ export function Shop() {
   const restoreStreakWithFeather = useStore((s) => s.restoreStreakWithFeather);
   const buyCosmetic = useStore((s) => s.buyCosmetic);
   const setCosmetic = useStore((s) => s.setCosmetic);
+  const attributes = useStore((s) => s.character.attributes);
+  const buyGear = useStore((s) => s.buyGear);
+  const setGearEquipped = useStore((s) => s.setGearEquipped);
 
   const [tab, setTab] = useState<Tab>('rewards');
   const [editing, setEditing] = useState<Reward | 'new' | null>(null);
@@ -34,6 +39,11 @@ export function Shop() {
     () => [...rewards].sort((a, b) => getRewardCost(a.tier) - getRewardCost(b.tier)),
     [rewards],
   );
+  // Only your own class's gear is listed. Everything else would be clutter you
+  // couldn't buy anyway, and it stays waiting if your class ever changes back.
+  const { attribute: classAttribute, className } = useMemo(() => getCharacterClass(attributes), [attributes]);
+  const classGear = useMemo(() => getGearForClass(classAttribute), [classAttribute]);
+
   const restorable = useMemo(
     () => habits.filter((h) => !h.archived && (h.lastBrokenStreak ?? 0) > 0),
     [habits],
@@ -62,6 +72,7 @@ export function Shop() {
   const tabs: { key: Tab; label: string }[] = [
     { key: 'rewards', label: 'Rewards' },
     { key: 'items', label: 'Items' },
+    { key: 'gear', label: 'Gear' },
     { key: 'cosmetics', label: 'Cosmetics' },
   ];
 
@@ -193,6 +204,28 @@ export function Shop() {
         </div>
       )}
 
+      {tab === 'gear' && (
+        <div className="flex flex-col gap-3">
+          <p className="text-[11px] text-white/35">
+            Gear for your {className}. It changes how your character looks and nothing else. Other classes' gear
+            is hidden — if your highest attribute changes, that class's gear appears here instead, and anything
+            you've bought is waiting for you when you come back.
+          </p>
+
+          {classGear.map((gear) => (
+            <GearRow
+              key={gear.id}
+              gear={gear}
+              owned={cosmetics.unlockedGear.includes(gear.id)}
+              equipped={cosmetics.equippedGear.includes(gear.id)}
+              gold={gold}
+              onBuy={() => buyGear(gear.id)}
+              onToggle={(next) => setGearEquipped(gear.id, next)}
+            />
+          ))}
+        </div>
+      )}
+
       {tab === 'cosmetics' && (
         <div className="flex flex-col gap-4">
           <p className="text-[11px] text-white/35">
@@ -222,6 +255,59 @@ export function Shop() {
       )}
 
       {editing && <AddEditReward reward={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
+    </div>
+  );
+}
+
+function GearRow({
+  gear,
+  owned,
+  equipped,
+  gold,
+  onBuy,
+  onToggle,
+}: {
+  gear: GearItem;
+  owned: boolean;
+  equipped: boolean;
+  gold: number;
+  onBuy: () => void;
+  onToggle: (next: boolean) => void;
+}) {
+  return (
+    <div
+      className={`parchment-border rounded-xl p-3.5 ${
+        gear.legendary ? 'bg-gold-500/[0.07] ring-1 ring-gold-400/40' : 'bg-ink-800/50'
+      }`}
+    >
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-[10px] uppercase tracking-widest text-white/35">{SLOT_LABELS[gear.slot]}</span>
+            {gear.legendary && (
+              <span className="rounded-full bg-gold-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gold-300">
+                Legendary
+              </span>
+            )}
+          </div>
+          <p className={`font-display font-semibold ${gear.legendary ? 'text-gold-300' : 'text-white/85'}`}>
+            {gear.name}
+          </p>
+          <p className="mt-0.5 text-[11px] text-white/45">{gear.description}</p>
+        </div>
+        {owned ? (
+          <button
+            onClick={() => onToggle(!equipped)}
+            className={`shrink-0 rounded-full px-4 py-2 text-sm font-semibold active:scale-95 ${
+              equipped ? 'bg-gold-500 text-ink-950' : 'border border-white/20 text-white/70'
+            }`}
+          >
+            {equipped ? 'Worn' : 'Wear'}
+          </button>
+        ) : (
+          <BuyButton label={`${gear.cost} 🪙`} disabled={gold < gear.cost} onClick={onBuy} />
+        )}
+      </div>
     </div>
   );
 }

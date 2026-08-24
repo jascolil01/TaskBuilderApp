@@ -69,6 +69,13 @@ export interface Cosmetics {
   activeTitle: string | null;
   /** Overrides the level-tier ring colour on the avatar when set. */
   activeRing: string | null;
+  /** Gear ids owned. Ownership is permanent even if your class drifts. */
+  unlockedGear: string[];
+  /**
+   * Gear ids currently worn, across every class. Stored flat rather than per
+   * slot so a class you drift away from keeps its loadout for your return.
+   */
+  equippedGear: string[];
 }
 
 /**

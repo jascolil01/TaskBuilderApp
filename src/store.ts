@@ -7,6 +7,7 @@ import type {
   BossWeek,
   CharacterState,
   CompletionEntry,
+  Cosmetics,
   Frequency,
   Habit,
   Inventory,
@@ -25,6 +26,7 @@ import {
   getCompletionAward,
   getCrossedPerks,
   getDecayPerMiss,
+  getCharacterClass,
   getEffectiveGraceDays,
   hasSignature,
   isDecaying,
@@ -51,6 +53,7 @@ import {
   isWeekOnVacation,
   validateVacation,
 } from './lib/vacation';
+import { getGear, isValidGearId, withEquipped, withoutEquipped } from './lib/gear';
 import { parseBackup } from './lib/backup';
 import { useToastStore } from './toastStore';
 
@@ -138,6 +141,8 @@ interface Store {
   restoreStreakWithFeather: (habitId: string) => void;
   buyCosmetic: (kind: 'title' | 'ring', id: string) => void;
   setCosmetic: (kind: 'title' | 'ring', id: string | null) => void;
+  buyGear: (id: string) => void;
+  setGearEquipped: (id: string, equipped: boolean) => void;
   claimBossVictory: () => void;
 
   scheduleVacation: (startDate: string, endDate: string) => { ok: boolean; error?: string };
@@ -165,6 +170,8 @@ function createInitialState() {
         unlockedRings: [] as string[],
         activeTitle: null as string | null,
         activeRing: null as string | null,
+        unlockedGear: [] as string[],
+        equippedGear: [] as string[],
       },
       lastDecayCheck: todayStr(),
     },
@@ -695,6 +702,57 @@ export const useStore = create<Store>()(
         }));
       },
 
+      buyGear: (id) => {
+        const state = get();
+        const gear = getGear(id);
+        if (!gear) return;
+        // Gear is bought for the class you are now. Another class's pieces are
+        // hidden from the shop, and this is the guard behind that.
+        if (getCharacterClass(state.character.attributes).attribute !== gear.attribute) return;
+        if (state.character.cosmetics.unlockedGear.includes(id)) return;
+        if (state.character.gold < gear.cost) return;
+
+        const entry: RedemptionEntry = {
+          id: makeId(),
+          rewardId: `gear-${id}`,
+          rewardName: gear.name,
+          cost: gear.cost,
+          date: todayStr(),
+          kind: 'utility',
+        };
+
+        useToastStore.getState().show(`${gear.legendary ? '🌟' : '✨'} Unlocked ${gear.name}.`);
+        set((s) => ({
+          character: {
+            ...s.character,
+            gold: s.character.gold - gear.cost,
+            cosmetics: {
+              ...s.character.cosmetics,
+              unlockedGear: [...s.character.cosmetics.unlockedGear, id],
+              // Wearing it straight away is what you paid to see.
+              equippedGear: withEquipped(s.character.cosmetics.equippedGear, id),
+            },
+          },
+          redemptions: [...s.redemptions, entry],
+        }));
+      },
+
+      setGearEquipped: (id, equipped) =>
+        set((s) => {
+          if (!s.character.cosmetics.unlockedGear.includes(id)) return s;
+          return {
+            character: {
+              ...s.character,
+              cosmetics: {
+                ...s.character.cosmetics,
+                equippedGear: equipped
+                  ? withEquipped(s.character.cosmetics.equippedGear, id)
+                  : withoutEquipped(s.character.cosmetics.equippedGear, id),
+              },
+            },
+          };
+        }),
+
       setCosmetic: (kind, cosmeticId) =>
         set((s) => {
           const owned =
@@ -792,7 +850,7 @@ export const useStore = create<Store>()(
           get();
         return JSON.stringify(
           {
-            version: 4,
+            version: 5,
             exportedAt: new Date().toISOString(),
             character,
             habits,
@@ -830,16 +888,41 @@ export const useStore = create<Store>()(
     }),
     {
       name: 'questlog-rpg-storage',
-      version: 4,
+      version: 5,
       migrate: (persisted, fromVersion) => {
         const state = persisted as Partial<Store> & { character?: Partial<CharacterState> };
-        if (fromVersion >= 4 || !state?.character) return state as Store;
+        if (!state?.character) return state as Store;
+
+        // v5: cosmetic gear. This has to run for every older save, including
+        // v4 ones that skip the migrations below — the renderer reads these
+        // arrays unconditionally, so leaving them undefined would crash.
+        const cosmetics = state.character.cosmetics as Partial<Cosmetics> | undefined;
+        const withGear: Partial<CharacterState> = {
+          ...state.character,
+          cosmetics: {
+            unlockedTitles: cosmetics?.unlockedTitles ?? [],
+            unlockedRings: cosmetics?.unlockedRings ?? [],
+            activeTitle: cosmetics?.activeTitle ?? null,
+            activeRing: cosmetics?.activeRing ?? null,
+            // Unknown ids are dropped rather than trusted; a stale one would
+            // otherwise sit in the loadout forever with nothing to render.
+            unlockedGear: (Array.isArray(cosmetics?.unlockedGear) ? cosmetics.unlockedGear : []).filter(
+              isValidGearId,
+            ),
+            equippedGear: (Array.isArray(cosmetics?.equippedGear) ? cosmetics.equippedGear : []).filter(
+              isValidGearId,
+            ),
+          },
+        };
+        if (fromVersion >= 4) {
+          return { ...state, character: withGear } as Store;
+        }
 
         // v1 had no lifetimeXp and no cheat-day state. Seed lifetime XP from
         // the completion log so existing players keep the progress they
         // earned rather than restarting at character level 1.
         const completions = Array.isArray(state.completions) ? state.completions : [];
-        const character = state.character;
+        const character = withGear;
         return {
           ...state,
           character: {
@@ -856,12 +939,6 @@ export const useStore = create<Store>()(
             },
             // v3: shop consumables and cosmetics.
             inventory: character.inventory ?? { ...EMPTY_INVENTORY },
-            cosmetics: character.cosmetics ?? {
-              unlockedTitles: [],
-              unlockedRings: [],
-              activeTitle: null,
-              activeRing: null,
-            },
           },
           // v3: reward prices moved from a free-form number to fixed tiers.
           rewards: (Array.isArray(state.rewards) ? state.rewards : []).map((r) => {
