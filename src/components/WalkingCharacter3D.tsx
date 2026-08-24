@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import type { AttributeKey } from '../types';
+import { capeJoint, STRIDE, walkPose } from '../lib/walk';
 
 /**
  * Every class shares one rig and one walk cycle; what changes is the palette
@@ -425,7 +426,6 @@ export function WalkingCharacter3D({ attribute }: { attribute: AttributeKey }) {
 
     const clock = new THREE.Clock();
     const PATROL_RANGE = 1.45;
-    const STRIDE = 5.6;
     // Three-quarter view: mostly facing the way they're walking, but angled
     // toward the viewer so you can still see the face and the kit.
     const FACING = (Math.PI / 2) * 0.62;
@@ -437,31 +437,28 @@ export function WalkingCharacter3D({ attribute }: { attribute: AttributeKey }) {
 
     const pose = (t: number) => {
       const phase = t * STRIDE;
-      const swing = Math.sin(phase);
+      const p = walkPose(phase);
 
-      rig.legs.left.hip.rotation.x = swing * 0.62;
-      rig.legs.right.hip.rotation.x = -swing * 0.62;
-      // Knees only ever fold one way, and only on the leg trailing behind.
-      rig.legs.left.knee.rotation.x = -Math.max(0, Math.sin(phase - 1.0)) * 1.0;
-      rig.legs.right.knee.rotation.x = -Math.max(0, Math.sin(phase + Math.PI - 1.0)) * 1.0;
+      rig.legs.left.hip.rotation.x = p.leftHip;
+      rig.legs.right.hip.rotation.x = p.rightHip;
+      rig.legs.left.knee.rotation.x = p.leftKnee;
+      rig.legs.right.knee.rotation.x = p.rightKnee;
 
-      // The weapon arm swings less so the kit doesn't windmill.
-      rig.arms.left.shoulder.rotation.x = -swing * 0.5;
-      rig.arms.right.shoulder.rotation.x = swing * 0.3;
-      rig.arms.left.elbow.rotation.x = -0.25 - Math.max(0, -swing) * 0.5;
-      rig.arms.right.elbow.rotation.x = -0.35 - Math.max(0, swing) * 0.3;
+      rig.arms.left.shoulder.rotation.x = p.leftShoulder;
+      rig.arms.right.shoulder.rotation.x = p.rightShoulder;
+      rig.arms.left.elbow.rotation.x = p.leftElbow;
+      rig.arms.right.elbow.rotation.x = p.rightElbow;
 
-      // Hips rise twice per stride, at the moment each foot passes under.
-      rig.body.position.y = Math.abs(Math.sin(phase)) * 0.055;
-      rig.torso.rotation.y = swing * 0.13;
+      rig.body.position.y = p.bob;
+      rig.torso.rotation.y = p.torsoTwist;
       rig.torso.rotation.x = 0.05;
-      rig.head.rotation.y = -swing * 0.1;
-      rig.head.rotation.x = Math.sin(phase * 2) * 0.04;
+      rig.head.rotation.y = p.headTurn;
+      rig.head.rotation.x = p.headNod;
 
-      // Each cape panel lags a little further behind the one above it.
       rig.cape.joints.forEach((joint, i) => {
-        joint.rotation.x = 0.12 + Math.sin(phase - i * 0.7) * (0.07 + i * 0.04);
-        joint.rotation.z = Math.sin(phase * 0.5 - i * 0.5) * 0.05;
+        const c = capeJoint(phase, i);
+        joint.rotation.x = c.x;
+        joint.rotation.z = c.z;
       });
 
       rig.kit.tick?.(t);
