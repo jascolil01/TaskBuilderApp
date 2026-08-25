@@ -14,7 +14,10 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
   const [message, setMessage] = useState<string | null>(null);
 
   const level = getCharacterProgress(character.lifetimeXp).level;
-  const { attribute: dominantAttribute, className } = getCharacterClass(character.attributes);
+  const { attribute: dominantAttribute, className } = getCharacterClass(
+    character.attributes,
+    character.preferredClass,
+  );
 
   const renderToBlob = async (): Promise<Blob | null> => {
     const svgEl = svgRef.current;

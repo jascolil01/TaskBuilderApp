@@ -116,6 +116,12 @@ export interface CharacterState {
   cheatDay: CheatDayState;
   inventory: Inventory;
   cosmetics: Cosmetics;
+  /**
+   * Which class to present as while attributes are tied for the lead.
+   * Ignored the moment that attribute stops being tied, so it can never pin
+   * you to a class you've genuinely outgrown.
+   */
+  preferredClass?: AttributeKey | null;
   lastDecayCheck: string;
 }
 

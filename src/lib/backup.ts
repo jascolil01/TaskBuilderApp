@@ -157,6 +157,11 @@ function parseCharacter(raw: unknown, completions: unknown): CharacterState | nu
     cheatDay: parseCheatDay(raw.cheatDay, attributes.CON.level),
     inventory: parseInventory(raw.inventory),
     cosmetics: parseCosmetics(raw.cosmetics),
+    // Only a real attribute key survives; anything else is dropped and the
+    // class falls back to priority order, which is always safe.
+    preferredClass: ATTRIBUTE_KEYS.includes(raw.preferredClass as AttributeKey)
+      ? (raw.preferredClass as AttributeKey)
+      : null,
     lastDecayCheck: typeof raw.lastDecayCheck === 'string' ? raw.lastDecayCheck : todayStr(),
   };
 }

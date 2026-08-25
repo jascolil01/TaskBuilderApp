@@ -122,6 +122,7 @@ interface Store {
   settings: ReminderSettings;
 
   setCharacterName: (name: string) => void;
+  setPreferredClass: (attribute: AttributeKey | null) => void;
   spendCheatDay: () => void;
   setReminderSettings: (patch: Partial<Pick<ReminderSettings, 'enabled' | 'time'>>) => void;
   markReminderNotified: (date: string) => void;
@@ -181,6 +182,7 @@ function createInitialState() {
         unlockedGear: [] as string[],
         equippedGear: [] as string[],
       },
+      preferredClass: null as AttributeKey | null,
       lastDecayCheck: todayStr(),
     },
     habits: starterHabits(),
@@ -225,6 +227,13 @@ export const useStore = create<Store>()(
 
       setCharacterName: (name) =>
         set((state) => ({ character: { ...state.character, name: name.trim().slice(0, 24) } })),
+
+      /**
+       * Only meaningful while attributes are tied for the lead; the getter
+       * ignores a stale preference, so nothing here needs to police it.
+       */
+      setPreferredClass: (attribute) =>
+        set((state) => ({ character: { ...state.character, preferredClass: attribute } })),
 
       setReminderSettings: (patch) => set((state) => ({ settings: { ...state.settings, ...patch } })),
 
@@ -846,7 +855,8 @@ export const useStore = create<Store>()(
         if (!gear) return;
         // Gear is bought for the class you are now. Another class's pieces are
         // hidden from the shop, and this is the guard behind that.
-        if (getCharacterClass(state.character.attributes).attribute !== gear.attribute) return;
+        if (getCharacterClass(state.character.attributes, state.character.preferredClass).attribute !== gear.attribute)
+          return;
         if (state.character.cosmetics.unlockedGear.includes(id)) return;
         if (state.character.gold < gear.cost) return;
 

@@ -41,7 +41,11 @@ export function Shop() {
   );
   // Only your own class's gear is listed. Everything else would be clutter you
   // couldn't buy anyway, and it stays waiting if your class ever changes back.
-  const { attribute: classAttribute, className } = useMemo(() => getCharacterClass(attributes), [attributes]);
+  const preferredClass = useStore((s) => s.character.preferredClass);
+  const { attribute: classAttribute, className } = useMemo(
+    () => getCharacterClass(attributes, preferredClass),
+    [attributes, preferredClass],
+  );
   const classGear = useMemo(() => getGearForClass(classAttribute), [classAttribute]);
 
   const restorable = useMemo(

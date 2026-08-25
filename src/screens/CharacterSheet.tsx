@@ -1,7 +1,15 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
 import type { AttributeKey } from '../types';
-import { ATTRIBUTE_INFO, ATTRIBUTE_KEYS, getCharacterClass, getCharacterProgress, getTier, xpToNextLevel } from '../lib/rpg';
+import {
+  ATTRIBUTE_INFO,
+  ATTRIBUTE_KEYS,
+  CLASS_BY_ATTRIBUTE,
+  getCharacterClass,
+  getCharacterProgress,
+  getTier,
+  xpToNextLevel,
+} from '../lib/rpg';
 import { getNextPerk, getUnlockedPerks, isAtRisk, isDecaying } from '../lib/rpg';
 import { XpBar } from '../components/XpBar';
 import { Avatar } from '../components/Avatar';
@@ -22,14 +30,15 @@ export function CharacterSheet() {
   const character = useStore((s) => s.character);
   const allHabits = useStore((s) => s.habits);
   const habits = useMemo(() => allHabits.filter((h) => !h.archived), [allHabits]);
+  const setPreferredClass = useStore((s) => s.setPreferredClass);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
 
   const progress = useMemo(() => getCharacterProgress(character.lifetimeXp), [character.lifetimeXp]);
   const level = progress.level;
-  const { attribute: dominantAttribute, className } = useMemo(
-    () => getCharacterClass(character.attributes),
-    [character.attributes],
+  const { attribute: dominantAttribute, className, tied } = useMemo(
+    () => getCharacterClass(character.attributes, character.preferredClass),
+    [character.attributes, character.preferredClass],
   );
   const tier = useMemo(() => getTier(level), [level]);
   const equippedTitle = useMemo(
@@ -99,6 +108,29 @@ export function CharacterSheet() {
         <p className="mt-1 text-sm text-gold-400/80">
           Level {level} {className}
         </p>
+        {tied.length > 1 && (
+          <div className="mt-2">
+            <p className="text-[10px] uppercase tracking-widest text-white/30">
+              {tied.length} attributes tied — choose your class
+            </p>
+            <div className="mt-1.5 flex flex-wrap justify-center gap-1.5">
+              {tied.map((key) => (
+                <button
+                  key={key}
+                  onClick={() => setPreferredClass(key)}
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                    key === dominantAttribute
+                      ? 'text-ink-950'
+                      : 'border border-white/15 text-white/55'
+                  }`}
+                  style={key === dominantAttribute ? { background: ATTRIBUTE_INFO[key].color } : undefined}
+                >
+                  {CLASS_BY_ATTRIBUTE[key]}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="mt-4">
           <XpBar level={level} xp={progress.xpIntoLevel} pct={Math.round((progress.xpIntoLevel / progress.xpForNext) * 100)} color="var(--color-gold-500)" height={12} />
         </div>
