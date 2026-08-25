@@ -61,6 +61,7 @@ import {
   validateVacation,
 } from './lib/vacation';
 import { getGear, isValidGearId, withEquipped, withoutEquipped } from './lib/gear';
+import { canChangeTier, getClassReward, getCooldown } from './lib/rewards';
 import { parseBackup } from './lib/backup';
 import { useToastStore } from './toastStore';
 
@@ -684,29 +685,64 @@ export const useStore = create<Store>()(
           ],
         })),
 
-      updateReward: (id, patch) =>
+      updateReward: (id, patch) => {
+        const existing = get().rewards.find((r) => r.id === id);
+        // A tier can be raised but never lowered. Deciding a treat is worth
+        // less the moment you want it is the same self-discounting the fixed
+        // tiers exist to stop, just one level up.
+        if (existing && patch.tier && !canChangeTier(existing.tier, patch.tier)) {
+          useToastStore
+            .getState()
+            .show("A reward's tier can be raised, but not lowered. Make a new one if it's smaller than you thought.");
+          return;
+        }
         set((state) => ({
           rewards: state.rewards.map((r) => (r.id === id ? { ...r, ...patch } : r)),
-        })),
+        }));
+      },
 
       deleteReward: (id) =>
         set((state) => ({
           rewards: state.rewards.filter((r) => r.id !== id),
         })),
 
+      /**
+       * Handles both a reward you wrote and one of your class's curated ones —
+       * the curated set lives in a catalog rather than in `rewards`, so it
+       * can't be renamed, re-tiered or deleted.
+       */
       redeemReward: (id) => {
         const state = get();
-        const reward = state.rewards.find((r) => r.id === id);
-        if (!reward) return;
-        const cost = getRewardCost(reward.tier);
+        const today = todayStr();
+        const custom = state.rewards.find((r) => r.id === id);
+        const curated = custom ? null : getClassReward(id);
+        if (!custom && !curated) return;
+
+        const tier = custom ? custom.tier : curated!.tier;
+        const name = custom ? custom.name : curated!.name;
+        // A curated reward belongs to a class; you can only claim your own.
+        if (curated) {
+          const { attribute } = getCharacterClass(state.character.attributes, state.character.preferredClass);
+          if (curated.attribute !== attribute) return;
+        }
+
+        const cooldown = getCooldown(id, tier, state.redemptions, today);
+        if (cooldown.active) {
+          useToastStore
+            .getState()
+            .show(`Still resting — claim this again in ${cooldown.daysLeft} day${cooldown.daysLeft === 1 ? '' : 's'}.`);
+          return;
+        }
+
+        const cost = getRewardCost(tier);
         if (state.character.gold < cost) return;
 
         const entry: RedemptionEntry = {
           id: makeId(),
-          rewardId: reward.id,
-          rewardName: reward.name,
+          rewardId: id,
+          rewardName: name,
           cost,
-          date: todayStr(),
+          date: today,
           kind: 'reward',
         };
 

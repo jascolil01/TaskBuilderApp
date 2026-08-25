@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useStore } from '../store';
 import type { Reward } from '../types';
 import { REWARD_TIER_ORDER, REWARD_TIERS, type RewardTier } from '../lib/shop';
+import { canChangeTier } from '../lib/rewards';
 
 export function AddEditReward({ reward, onClose }: { reward: Reward | null; onClose: () => void }) {
   const addReward = useStore((s) => s.addReward);
@@ -41,18 +42,23 @@ export function AddEditReward({ reward, onClose }: { reward: Reward | null; onCl
         <label className="mt-5 block text-xs uppercase tracking-wide text-white/50">How big a reward is it?</label>
         <p className="mt-0.5 text-[11px] text-white/30">
           The price is set by the tier — pick honestly and it stays worth earning.
+          {reward && ' You can move a reward up a tier later, but never down.'}
         </p>
         <div className="mt-2 flex flex-col gap-2">
           {REWARD_TIER_ORDER.map((key) => {
             const info = REWARD_TIERS[key];
             const selected = tier === key;
+            // Editing can raise a tier but not lower it; the store refuses it
+            // either way, so the picker shouldn't offer what it will reject.
+            const locked = reward ? !canChangeTier(reward.tier, key) : false;
             return (
               <button
                 key={key}
-                onClick={() => setTier(key)}
+                onClick={() => !locked && setTier(key)}
+                disabled={locked}
                 className={`rounded-lg border px-3 py-2.5 text-left transition-colors ${
                   selected ? 'border-gold-500 bg-gold-500/15' : 'border-white/15'
-                }`}
+                } ${locked ? 'cursor-not-allowed opacity-35' : ''}`}
               >
                 <div className="flex items-baseline justify-between gap-2">
                   <span className={`font-display font-semibold ${selected ? 'text-gold-300' : 'text-white/70'}`}>
@@ -63,7 +69,7 @@ export function AddEditReward({ reward, onClose }: { reward: Reward | null; onCl
                   </span>
                 </div>
                 <p className="mt-0.5 text-[11px] text-white/35">
-                  {info.hint} · about {info.pace} to earn
+                  {locked ? 'Lower than it is now — rewards can only move up.' : `${info.hint} · about ${info.pace} to earn`}
                 </p>
               </button>
             );

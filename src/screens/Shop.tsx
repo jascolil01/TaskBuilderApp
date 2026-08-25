@@ -7,10 +7,13 @@ import {
   COSMETIC_TITLES,
   getRewardCost,
   REWARD_TIERS,
+  type RewardTier,
   SHOP_ITEMS,
 } from '../lib/shop';
 import { getCharacterClass } from '../lib/rpg';
 import { getGearForClass, SLOT_LABELS, type GearItem } from '../lib/gear';
+import { COOLDOWN_LABEL, getClassRewards, getCooldown, type CooldownState } from '../lib/rewards';
+import { todayStr } from '../lib/date';
 import { AddEditReward } from './AddEditReward';
 
 type Tab = 'rewards' | 'items' | 'gear' | 'cosmetics';
@@ -47,6 +50,12 @@ export function Shop() {
     [attributes, preferredClass],
   );
   const classGear = useMemo(() => getGearForClass(classAttribute), [classAttribute]);
+
+  const redemptions = useStore((s) => s.redemptions);
+  const today = todayStr();
+  const classRewards = useMemo(() => getClassRewards(classAttribute), [classAttribute]);
+  const cooldownFor = (id: string, tier: Parameters<typeof getRewardCost>[0]) =>
+    getCooldown(id, tier, redemptions, today);
 
   const restorable = useMemo(
     () => habits.filter((h) => !h.archived && (h.lastBrokenStreak ?? 0) > 0),
@@ -106,6 +115,35 @@ export function Shop() {
 
       {tab === 'rewards' && (
         <>
+          <div className="rounded-xl border border-white/10 bg-ink-800/40 px-4 py-3">
+            <h2 className="font-display text-sm text-gold-300">{className} rewards</h2>
+            <p className="mt-1 text-[11px] text-white/40">
+              One at every tier, priced and worded for you — a reference for what each tier is actually meant to
+              feel like. Every reward rests after you claim it, so a treat stays a treat.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-2.5">
+            {classRewards.map((reward) => (
+              <RewardRow
+                key={reward.id}
+                name={reward.name}
+                tier={reward.tier}
+                cost={reward.cost}
+                gold={gold}
+                cooldown={cooldownFor(reward.id, reward.tier)}
+                curated
+                onRedeem={() => redeemReward(reward.id)}
+              />
+            ))}
+          </div>
+
+          <div className="mt-1 flex items-center gap-3">
+            <div className="h-px flex-1 bg-white/10" />
+            <span className="text-[10px] uppercase tracking-widest text-white/30">Your own</span>
+            <div className="h-px flex-1 bg-white/10" />
+          </div>
+
           <button
             onClick={() => setEditing('new')}
             className="rounded-full border border-gold-500/60 bg-gold-500/10 px-4 py-2 text-sm font-medium text-gold-300 active:scale-95"
@@ -114,25 +152,26 @@ export function Shop() {
           </button>
 
           {sortedRewards.length === 0 ? (
-            <EmptyState icon="🏪" title="No rewards yet" body="Add something you actually want to work toward." />
+            <EmptyState
+              icon="🏪"
+              title="Nothing of your own yet"
+              body="The class rewards above cover most of it — add your own only if there's something specific you want."
+            />
           ) : (
             <div className="flex flex-col gap-2.5">
               {sortedRewards.map((reward) => {
                 const cost = getRewardCost(reward.tier);
-                const affordable = gold >= cost;
                 return (
-                  <div key={reward.id} className="parchment-border flex items-center gap-3 rounded-xl bg-ink-800/50 p-3.5">
-                    <button className="min-w-0 flex-1 text-left" onClick={() => setEditing(reward)}>
-                      <p className="truncate font-medium text-white/90">{reward.name}</p>
-                      <p className="mt-0.5 text-xs text-gold-400/80">
-                        {REWARD_TIERS[reward.tier].label} · 🪙 {cost}
-                      </p>
-                      {!affordable && (
-                        <p className="mt-0.5 text-[11px] text-white/30">{cost - gold} more gold to go</p>
-                      )}
-                    </button>
-                    <BuyButton label="Redeem" disabled={!affordable} onClick={() => redeemReward(reward.id)} />
-                  </div>
+                  <RewardRow
+                    key={reward.id}
+                    name={reward.name}
+                    tier={reward.tier}
+                    cost={cost}
+                    gold={gold}
+                    cooldown={cooldownFor(reward.id, reward.tier)}
+                    onEdit={() => setEditing(reward)}
+                    onRedeem={() => redeemReward(reward.id)}
+                  />
                 );
               })}
             </div>
@@ -259,6 +298,66 @@ export function Shop() {
       )}
 
       {editing && <AddEditReward reward={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
+    </div>
+  );
+}
+
+function RewardRow({
+  name,
+  tier,
+  cost,
+  gold,
+  cooldown,
+  curated = false,
+  onEdit,
+  onRedeem,
+}: {
+  name: string;
+  tier: RewardTier;
+  cost: number;
+  gold: number;
+  cooldown: CooldownState;
+  curated?: boolean;
+  onEdit?: () => void;
+  onRedeem: () => void;
+}) {
+  const affordable = gold >= cost;
+  const body = (
+    <>
+      <p className="font-medium text-white/90">{name}</p>
+      <p className="mt-0.5 text-xs text-gold-400/80">
+        {REWARD_TIERS[tier].label} · 🪙 {cost}
+        <span className="ml-1.5 text-white/30">{COOLDOWN_LABEL[tier]}</span>
+      </p>
+      {cooldown.active ? (
+        <p className="mt-0.5 text-[11px] text-mana-400/80">
+          Resting — back in {cooldown.daysLeft} day{cooldown.daysLeft === 1 ? '' : 's'}
+        </p>
+      ) : (
+        !affordable && <p className="mt-0.5 text-[11px] text-white/30">{cost - gold} more gold to go</p>
+      )}
+    </>
+  );
+
+  return (
+    <div
+      className={`parchment-border flex items-center gap-3 rounded-xl p-3.5 ${
+        cooldown.active ? 'bg-ink-800/30 opacity-60' : 'bg-ink-800/50'
+      }`}
+    >
+      {onEdit ? (
+        <button className="min-w-0 flex-1 text-left" onClick={onEdit}>
+          {body}
+        </button>
+      ) : (
+        <div className="min-w-0 flex-1">{body}</div>
+      )}
+      <BuyButton
+        label={cooldown.active ? `${cooldown.daysLeft}d` : 'Redeem'}
+        disabled={!affordable || cooldown.active}
+        onClick={onRedeem}
+      />
+      {curated && <span className="sr-only">Class reward</span>}
     </div>
   );
 }
