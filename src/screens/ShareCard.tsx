@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { useStore } from '../store';
 import { getCharacterClass, getCharacterProgress } from '../lib/rpg';
+import { getEquippedBySlot, getGear } from '../lib/gear';
 import { ShareCardSvg } from '../components/ShareCardSvg';
 
 const EXPORT_SCALE = 2;
@@ -18,6 +19,11 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
     character.attributes,
     character.preferredClass,
   );
+  // Only the gear for the class you're presenting as — that's what the card
+  // shows a picture of.
+  const loadout = Object.values(getEquippedBySlot(character.cosmetics.equippedGear, dominantAttribute))
+    .map((id) => getGear(id)?.name)
+    .filter((n): n is string => Boolean(n));
 
   const renderToBlob = async (): Promise<Blob | null> => {
     const svgEl = svgRef.current;
@@ -104,6 +110,7 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
             dominantAttribute={dominantAttribute}
             attributes={character.attributes}
             gold={character.gold}
+            loadout={loadout}
           />
         </div>
 

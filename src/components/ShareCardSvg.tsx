@@ -24,8 +24,10 @@ export const ShareCardSvg = forwardRef<
     dominantAttribute: AttributeKey;
     attributes: Attributes;
     gold: number;
+    /** Names of the gear worn, if any — the loadout is worth showing off. */
+    loadout?: string[];
   }
->(function ShareCardSvg({ name, level, className, dominantAttribute, attributes, gold }, ref) {
+>(function ShareCardSvg({ name, level, className, dominantAttribute, attributes, gold, loadout = [] }, ref) {
   const tier = useMemo(() => {
     const t = getTier(level);
     return { ...t, ring: resolveColor(t.ring) };
@@ -120,7 +122,20 @@ export const ShareCardSvg = forwardRef<
         );
       })}
 
-      <text x="200" y="580" textAnchor="middle" fontFamily="Inter, sans-serif" fontSize="10" fill="rgba(255,255,255,0.3)">
+      {loadout.length > 0 && (
+        <g>
+          <text x="200" y="556" textAnchor="middle" fontFamily="Inter, sans-serif" fontSize="9" fill="rgba(255,255,255,0.35)">
+            {loadout.slice(0, 3).join(' · ')}
+          </text>
+          {loadout.length > 3 && (
+            <text x="200" y="568" textAnchor="middle" fontFamily="Inter, sans-serif" fontSize="9" fill="rgba(255,255,255,0.35)">
+              {loadout.slice(3, 6).join(' · ')}
+            </text>
+          )}
+        </g>
+      )}
+
+      <text x="200" y="584" textAnchor="middle" fontFamily="Inter, sans-serif" fontSize="10" fill="rgba(255,255,255,0.3)">
         Built with Questlog
       </text>
     </svg>

@@ -24,6 +24,7 @@ const WalkingCharacter3D = lazy(() =>
   import('../components/WalkingCharacter3D').then((m) => ({ default: m.WalkingCharacter3D })),
 );
 import { Settings } from './Settings';
+import { Wardrobe } from './Wardrobe';
 import { ShareCard } from './ShareCard';
 
 export function CharacterSheet() {
@@ -32,6 +33,7 @@ export function CharacterSheet() {
   const habits = useMemo(() => allHabits.filter((h) => !h.archived), [allHabits]);
   const setPreferredClass = useStore((s) => s.setPreferredClass);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [wardrobeOpen, setWardrobeOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
 
   const progress = useMemo(() => getCharacterProgress(character.lifetimeXp), [character.lifetimeXp]);
@@ -84,6 +86,13 @@ export function CharacterSheet() {
           className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-white/50 active:scale-90"
         >
           ⤴
+        </button>
+        <button
+          onClick={() => setWardrobeOpen(true)}
+          aria-label="Wardrobe"
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-white/50 active:scale-90"
+        >
+          🎽
         </button>
         <button
           onClick={() => setSettingsOpen(true)}
@@ -236,6 +245,7 @@ export function CharacterSheet() {
         })}
       </div>
 
+      {wardrobeOpen && <Wardrobe onClose={() => setWardrobeOpen(false)} />}
       {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
       {shareOpen && <ShareCard onClose={() => setShareOpen(false)} />}
     </div>
