@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { getDailyXpTotals } from '../lib/history';
 import { XpHistoryChart } from '../components/XpHistoryChart';
 import { BOSS_ROSTER } from '../lib/boss';
 import { BossMonster } from '../components/BossMonster';
+import { Stats } from './Stats';
 
 type FeedEntry = {
   id: string;
@@ -17,6 +18,7 @@ type FeedEntry = {
 };
 
 export function Chronicle() {
+  const [statsOpen, setStatsOpen] = useState(false);
   const habits = useStore((s) => s.habits);
   const completions = useStore((s) => s.completions);
   const redemptions = useStore((s) => s.redemptions);
@@ -60,7 +62,15 @@ export function Chronicle() {
 
   return (
     <div className="flex flex-col gap-4 px-4 pb-28 pt-6">
-      <h1 className="font-display text-xl font-bold text-gold-300">Chronicle</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="font-display text-xl font-bold text-gold-300">Chronicle</h1>
+        <button
+          onClick={() => setStatsOpen(true)}
+          className="rounded-full border border-gold-500/50 bg-gold-500/10 px-4 py-1.5 text-sm font-medium text-gold-300 active:scale-95"
+        >
+          📊 Statistics
+        </button>
+      </div>
 
       <div className="grid grid-cols-2 gap-2.5">
         <StatTile label="Total XP earned" value={totalXp} icon="⭐" />
@@ -118,6 +128,8 @@ export function Chronicle() {
           </div>
         )}
       </div>
+
+      {statsOpen && <Stats onClose={() => setStatsOpen(false)} />}
     </div>
   );
 }
