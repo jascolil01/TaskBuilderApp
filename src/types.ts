@@ -57,6 +57,8 @@ export interface CompletionEntry {
   baseXp?: number;
   /** Set when an Elixir of Might charge paid for this completion, so undo can refund it. */
   elixirUsed?: boolean;
+  /** Logged after the fact rather than on the day, so the Chronicle can say so. */
+  backfilled?: boolean;
   /** Absent on entries written before this was introduced. */
   prevProgress?: HabitProgressSnapshot;
 }

@@ -31,6 +31,7 @@ import {
   hasSignature,
   isDecaying,
   isScheduledDay,
+  planBackfill,
   processHabitDecay,
   removeXp,
   SIGNATURE_LEVEL,
@@ -137,6 +138,7 @@ interface Store {
   deleteHabit: (id: string) => void;
   completeHabit: (id: string) => void;
   undoCompleteHabit: (id: string) => void;
+  backfillYesterday: (id: string) => void;
 
   addReward: (input: { name: string; tier: RewardTier }) => void;
   updateReward: (id: string, patch: Partial<Pick<Reward, 'name' | 'tier'>>) => void;
@@ -448,6 +450,130 @@ export const useStore = create<Store>()(
                     lastCompletedDate: today,
                     decayedThroughDate: today,
                     missedSinceCompletion: onSchedule ? 0 : h.missedSinceCompletion,
+                  }
+                : h,
+            ),
+            completions: [...s.completions, entry],
+          };
+        });
+
+        get().claimBossVictory();
+      },
+
+      /**
+       * Logs a quest for yesterday — the "I did it, I just never opened the
+       * app" case. Capped at one day so it stays a repair rather than a way to
+       * reconstruct a week you didn't do.
+       *
+       * The decay pass has already run over yesterday by now, so this can't
+       * just append a completion: it has to hand back the XP that miss cost
+       * and rebuild the streak from the completion log, which is the only
+       * record of what the streak should have been.
+       */
+      backfillYesterday: (id) => {
+        const today = todayStr();
+        const yesterday = addDays(today, -1);
+        const state = get();
+        const habit = state.habits.find((h) => h.id === id);
+        if (!habit) return;
+
+        const completedDates = new Set(
+          state.completions.filter((c) => c.habitId === id).map((c) => c.date),
+        );
+        const forgiven = new Set([
+          ...state.character.cheatDay.usedDates,
+          ...getVacationDates(state.vacations),
+        ]);
+        const graceDays = getEffectiveGraceDays(habit, state.character.attributes);
+        const perMiss = getDecayPerMiss(habit, state.character.attributes);
+
+        const plan = planBackfill(habit, yesterday, {
+          graceDays,
+          perMiss,
+          forgiven,
+          completedDates,
+          today,
+        });
+        if (!plan.ok) {
+          if (plan.reason) useToastStore.getState().show(plan.reason);
+          return;
+        }
+
+        // Backfilling deliberately doesn't touch an Elixir: those charges were
+        // bought for effort still to come, and spending one on a day already
+        // past would be a surprise.
+        const award = getCompletionAward(habit, state.character.attributes, plan.newStreak, false);
+        const entry: CompletionEntry = {
+          id: makeId(),
+          habitId: id,
+          date: yesterday,
+          xpAwarded: award.xp,
+          baseXp: award.baseXp,
+          goldAwarded: award.gold,
+          backfilled: true,
+          prevProgress: {
+            streak: habit.streak,
+            bestStreak: habit.bestStreak,
+            missedSinceCompletion: habit.missedSinceCompletion,
+            lastCompletedDate: habit.lastCompletedDate,
+            decayedThroughDate: habit.decayedThroughDate,
+          },
+        };
+
+        const total = award.xp + plan.xpRefund;
+        const oldLevel = state.character.attributes[habit.attribute].level;
+        const newAttrState = addXp(state.character.attributes[habit.attribute], total);
+        const crossed = getCrossedPerks(habit.attribute, oldLevel, newAttrState.level);
+        useToastStore
+          .getState()
+          .show(
+            plan.xpRefund > 0
+              ? `📜 Logged for yesterday — streak restored and ${plan.xpRefund} XP given back.`
+              : '📜 Logged for yesterday — streak restored.',
+          );
+        if (crossed.length > 0) {
+          const perk = crossed[crossed.length - 1];
+          useToastStore.getState().show(`🎉 Perk unlocked: ${perk.name}`);
+        }
+
+        set((s) => {
+          const attributes: Attributes = {
+            ...s.character.attributes,
+            [habit.attribute]: addXp(s.character.attributes[habit.attribute], total),
+          };
+          let spilled = 0;
+          if (award.spilloverXp > 0) {
+            for (const key of ATTRIBUTE_KEYS) {
+              if (key === habit.attribute) continue;
+              attributes[key] = addXp(attributes[key], award.spilloverXp);
+              spilled += award.spilloverXp;
+            }
+          }
+          let character: CharacterState = {
+            ...s.character,
+            gold: s.character.gold + award.gold,
+            // The refund is XP returned, not newly earned, so it must not
+            // inflate the lifetime total that drives character level.
+            lifetimeXp: s.character.lifetimeXp + award.xp + spilled,
+            attributes,
+          };
+          character = withCheatDayUnlock(character);
+          character = advanceCheatDayRecharge(character);
+
+          const doneToday = completedDates.has(today);
+          return {
+            character,
+            habits: s.habits.map((h) =>
+              h.id === id
+                ? {
+                    ...h,
+                    streak: plan.newStreak,
+                    bestStreak: Math.max(h.bestStreak, plan.newStreak),
+                    // Today's completion, if there is one, still owns these.
+                    lastCompletedDate: doneToday ? h.lastCompletedDate : yesterday,
+                    decayedThroughDate: doneToday ? h.decayedThroughDate : yesterday,
+                    missedSinceCompletion: 0,
+                    lastBrokenStreak: undefined,
                   }
                 : h,
             ),

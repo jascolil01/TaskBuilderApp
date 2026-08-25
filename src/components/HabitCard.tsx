@@ -1,7 +1,7 @@
 import { useStore } from '../store';
 import type { Habit } from '../types';
-import { ATTRIBUTE_INFO, GOLD_PER_XP, isAtRisk, isDecaying } from '../lib/rpg';
-import { todayStr, weekdayLabel } from '../lib/date';
+import { ATTRIBUTE_INFO, GOLD_PER_XP, isAtRisk, isDecaying, isScheduledDay } from '../lib/rpg';
+import { addDays, todayStr, weekdayLabel } from '../lib/date';
 
 export function HabitCard({
   habit,
@@ -14,11 +14,22 @@ export function HabitCard({
 }) {
   const completeHabit = useStore((s) => s.completeHabit);
   const undoCompleteHabit = useStore((s) => s.undoCompleteHabit);
+  const backfillYesterday = useStore((s) => s.backfillYesterday);
+  const completions = useStore((s) => s.completions);
   const info = ATTRIBUTE_INFO[habit.attribute];
   const doneToday = habit.lastCompletedDate === todayStr();
   const attributes = useStore((s) => s.character.attributes);
   const decaying = isDecaying(habit, attributes);
   const atRisk = isAtRisk(habit, attributes);
+
+  // Offered only where it makes sense: a scheduled day, one day back, that the
+  // quest existed for and has no completion yet.
+  const yesterday = addDays(todayStr(), -1);
+  const canBackfill =
+    !habit.archived &&
+    isScheduledDay(habit, yesterday) &&
+    yesterday >= habit.createdAt.slice(0, 10) &&
+    !completions.some((c) => c.habitId === habit.id && c.date === yesterday);
 
   const scheduleLabel =
     habit.frequency.type === 'daily'
@@ -73,6 +84,15 @@ export function HabitCard({
           </div>
         </button>
       </div>
+
+      {canBackfill && (
+        <button
+          onClick={() => backfillYesterday(habit.id)}
+          className="mt-2 w-full rounded-lg border border-white/12 py-1.5 text-[11px] text-white/45 active:scale-[0.98]"
+        >
+          📜 I did this yesterday
+        </button>
+      )}
     </div>
   );
 }

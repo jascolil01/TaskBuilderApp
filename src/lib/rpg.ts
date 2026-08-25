@@ -408,6 +408,120 @@ export function getDecayPerMiss(habit: Habit, attributes: Attributes): number {
   return Math.max(1, Math.round(perMiss));
 }
 
+/**
+ * Length of the unbroken run of scheduled, completed days ending the day
+ * before `date`.
+ *
+ * Deliberately walks the completion log rather than trusting `habit.streak`:
+ * backfilling has to reconstruct what the streak *would* have been if the
+ * missing day had been logged on time, and by then the cached value has
+ * already been zeroed by the decay pass. Forgiven days (a vacation, a Cheat
+ * Day) are stepped over exactly as decay steps over them, so the run survives
+ * them without needing a completion.
+ */
+export function streakEndingBefore(
+  habit: Habit,
+  completedDates: ReadonlySet<string>,
+  date: string,
+  forgiven: ReadonlySet<string> = new Set(),
+  maxLookback = 400,
+): number {
+  const floor = habit.createdAt.slice(0, 10);
+  let streak = 0;
+  let cursor = addDays(date, -1);
+  for (let i = 0; i < maxLookback && cursor >= floor; i += 1) {
+    if (isScheduledDay(habit, cursor) && !forgiven.has(cursor)) {
+      if (!completedDates.has(cursor)) break;
+      streak += 1;
+    }
+    cursor = addDays(cursor, -1);
+  }
+  return streak;
+}
+
+/**
+ * How many missed scheduled days had piled up as of `date`, counting `date`
+ * itself. Decay charges XP once this exceeds the grace period, so this is what
+ * decides whether a backfilled day is owed a refund.
+ */
+export function missesEndingAt(
+  habit: Habit,
+  completedDates: ReadonlySet<string>,
+  date: string,
+  forgiven: ReadonlySet<string> = new Set(),
+  maxLookback = 400,
+): number {
+  const floor = habit.createdAt.slice(0, 10);
+  let misses = 0;
+  let cursor = date;
+  for (let i = 0; i < maxLookback && cursor >= floor; i += 1) {
+    if (isScheduledDay(habit, cursor) && !forgiven.has(cursor)) {
+      if (completedDates.has(cursor)) break;
+      misses += 1;
+    }
+    cursor = addDays(cursor, -1);
+  }
+  return misses;
+}
+
+export interface BackfillPlan {
+  ok: boolean;
+  /** Why not, for the UI to explain rather than silently doing nothing. */
+  reason?: string;
+  /** The streak the habit should end up with, including today if it's done. */
+  newStreak: number;
+  /** XP to hand back for a decay charge that no longer applies. */
+  xpRefund: number;
+  /** False when the day wasn't a scheduled one — rewards, but no streak credit. */
+  wasScheduled: boolean;
+}
+
+export interface BackfillOptions {
+  graceDays: number;
+  perMiss: number;
+  forgiven?: ReadonlySet<string>;
+  completedDates: ReadonlySet<string>;
+  today: string;
+}
+
+/**
+ * Works out what logging `date` after the fact should do to a habit.
+ *
+ * Backfilling isn't just "add a completion": the decay pass has already run
+ * over that day, broken the streak and charged XP for it. This computes the
+ * state the habit would have been in had the day been logged on time, so the
+ * caller can restore it wholesale instead of patching the cached fields.
+ */
+export function planBackfill(habit: Habit, date: string, options: BackfillOptions): BackfillPlan {
+  const empty = { newStreak: habit.streak, xpRefund: 0, wasScheduled: false };
+  if (habit.archived) return { ok: false, reason: 'This quest is archived.', ...empty };
+  if (date < habit.createdAt.slice(0, 10)) {
+    return { ok: false, reason: "This quest didn't exist yet.", ...empty };
+  }
+  if (options.completedDates.has(date)) {
+    return { ok: false, reason: 'Already logged for that day.', ...empty };
+  }
+
+  const forgiven = options.forgiven ?? new Set<string>();
+  const wasScheduled = isScheduledDay(habit, date);
+  const streakBefore = streakEndingBefore(habit, options.completedDates, date, forgiven);
+  let newStreak = wasScheduled ? streakBefore + 1 : streakBefore;
+  // If today is already logged, the run now reaches through to today.
+  if (options.completedDates.has(options.today) && isScheduledDay(habit, options.today)) {
+    newStreak += 1;
+  }
+
+  // Only refund if decay actually got as far as this day and charged for it.
+  const processed = habit.decayedThroughDate !== null && habit.decayedThroughDate >= date;
+  const charged =
+    processed &&
+    wasScheduled &&
+    !forgiven.has(date) &&
+    missesEndingAt(habit, options.completedDates, date, forgiven) > options.graceDays;
+
+  return { ok: true, newStreak, xpRefund: charged ? options.perMiss : 0, wasScheduled };
+}
+
 export function isDecaying(habit: Habit, attributes?: Attributes): boolean {
   if (habit.archived) return false;
   const grace = attributes ? getEffectiveGraceDays(habit, attributes) : habit.graceDays;

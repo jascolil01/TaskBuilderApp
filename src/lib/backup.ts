@@ -211,6 +211,7 @@ function parseCompletion(raw: unknown): CompletionEntry | null {
   // Clamped to the awarded figure: base XP is what the quest was worth before
   // multipliers, so it can never exceed what was actually paid out, and a
   // hand-edited file must not be able to inflate boss progress.
+  if (raw.backfilled === true) entry.backfilled = true;
   if (raw.baseXp !== undefined) {
     entry.baseXp = Math.min(xpAwarded, Math.max(0, Math.floor(finiteNum(raw.baseXp, 0))));
   }

@@ -5,7 +5,16 @@ import { XpHistoryChart } from '../components/XpHistoryChart';
 import { BOSS_ROSTER } from '../lib/boss';
 import { BossMonster } from '../components/BossMonster';
 
-type FeedEntry = { id: string; date: string; icon: string; label: string; detail: string; color: string };
+type FeedEntry = {
+  id: string;
+  date: string;
+  icon: string;
+  label: string;
+  detail: string;
+  color: string;
+  /** Logged after the fact, so the log says so rather than looking identical. */
+  backfilled?: boolean;
+};
 
 export function Chronicle() {
   const habits = useStore((s) => s.habits);
@@ -32,6 +41,7 @@ export function Chronicle() {
       date: c.date,
       icon: '✅',
       label: habitNameById.get(c.habitId) ?? 'Quest',
+      backfilled: c.backfilled === true,
       detail: `+${c.xpAwarded} XP · +${c.goldAwarded}🪙`,
       color: 'text-verdant-400',
     }));
@@ -98,6 +108,9 @@ export function Chronicle() {
                 </span>
                 <span className="shrink-0 text-right text-xs">
                   <span className={entry.color}>{entry.detail}</span>
+                  {entry.backfilled && (
+                    <span className="ml-1.5 text-[10px] text-white/30">logged later</span>
+                  )}
                   <span className="ml-2 text-white/30">{entry.date.slice(5)}</span>
                 </span>
               </div>
