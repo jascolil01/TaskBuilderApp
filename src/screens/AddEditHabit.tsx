@@ -9,6 +9,7 @@ export function AddEditHabit({ habit, onClose }: { habit: Habit | null; onClose:
   const updateHabit = useStore((s) => s.updateHabit);
   const archiveHabit = useStore((s) => s.archiveHabit);
   const deleteHabit = useStore((s) => s.deleteHabit);
+  const completions = useStore((s) => s.completions);
 
   const [name, setName] = useState(habit?.name ?? '');
   const [attribute, setAttribute] = useState<AttributeKey>(habit?.attribute ?? 'STR');
@@ -161,7 +162,19 @@ export function AddEditHabit({ habit, onClose }: { habit: Habit | null; onClose:
             )}
             <button
               onClick={() => {
-                if (confirm('Delete this quest and its history? This cannot be undone.')) {
+                // Deleting also drops every completion logged against this
+                // quest, which erases it from the Chronicle and takes its
+                // contribution to this week's boss with it. That's a bigger
+                // deal than "and its history" was letting on.
+                const logged = completions.filter((c) => c.habitId === habit.id).length;
+                const detail = logged
+                  ? `This erases ${logged} logged completion${logged === 1 ? '' : 's'} from your Chronicle and this week's boss progress.`
+                  : 'It has no logged completions yet.';
+                if (
+                  confirm(
+                    `Delete "${habit.name}"?\n\n${detail}\n\nYour character keeps the XP and gold it already earned. To stop tracking a quest but keep its history, use Archive instead.\n\nThis cannot be undone.`,
+                  )
+                ) {
                   deleteHabit(habit.id);
                   onClose();
                 }

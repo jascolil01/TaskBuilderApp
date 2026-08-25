@@ -16,7 +16,7 @@ export function ReminderScheduler() {
     const check = () => {
       // Read fresh each tick rather than closing over state, so the interval
       // isn't torn down and restarted every time a quest changes.
-      const { settings, habits, markReminderNotified } = useStore.getState();
+      const { settings, habits, character, vacations, markReminderNotified } = useStore.getState();
       if (!settings.enabled) return;
 
       const today = todayStr();
@@ -26,7 +26,7 @@ export function ReminderScheduler() {
       // reminder meant it silently never fired.
       if (currentTimeHHMM() < settings.time) return;
 
-      const count = getIncompleteTodayCount(habits);
+      const count = getIncompleteTodayCount(habits, character.cheatDay, vacations);
       if (count > 0) notifyIncompleteQuests(count);
       markReminderNotified(today);
     };

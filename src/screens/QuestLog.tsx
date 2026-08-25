@@ -3,7 +3,8 @@ import { useStore } from '../store';
 import type { Habit } from '../types';
 import { HabitCard } from '../components/HabitCard';
 import { todayStr } from '../lib/date';
-import { getIncompleteTodayCount } from '../lib/reminders';
+import { getIncompleteTodayCount, isRestDay } from '../lib/reminders';
+import { getActiveVacation } from '../lib/vacation';
 import { isScheduledDay } from '../lib/rpg';
 import { AddEditHabit } from './AddEditHabit';
 
@@ -14,7 +15,14 @@ export function QuestLog() {
   const active = habits.filter((h) => !h.archived);
   const archived = habits.filter((h) => h.archived);
   const today = todayStr();
-  const incompleteCount = useMemo(() => getIncompleteTodayCount(active), [active]);
+  const cheatDay = useStore((s) => s.character.cheatDay);
+  const vacations = useStore((s) => s.vacations);
+  const restDay = useMemo(() => isRestDay(cheatDay, vacations), [cheatDay, vacations]);
+  const onVacation = useMemo(() => getActiveVacation(vacations, todayStr()) !== null, [vacations]);
+  const incompleteCount = useMemo(
+    () => getIncompleteTodayCount(active, cheatDay, vacations),
+    [active, cheatDay, vacations],
+  );
 
   const byDoneThenName = (a: Habit, b: Habit) => {
     const aDone = a.lastCompletedDate === today ? 1 : 0;
@@ -48,10 +56,17 @@ export function QuestLog() {
         </button>
       </div>
 
-      {incompleteCount > 0 && (
-        <div className="rounded-xl border border-gold-500/40 bg-gold-500/10 px-4 py-2.5 text-sm text-gold-300">
-          🔔 {incompleteCount} quest{incompleteCount > 1 ? 's' : ''} left today
+      {restDay ? (
+        <div className="rounded-xl border border-mana-500/40 bg-mana-500/10 px-4 py-2.5 text-sm text-mana-400">
+          {onVacation ? '🏝️ On vacation — nothing is due today.' : '🍰 Rest day — every quest is forgiven today.'}{' '}
+          <span className="text-white/45">Streaks are safe either way.</span>
         </div>
+      ) : (
+        incompleteCount > 0 && (
+          <div className="rounded-xl border border-gold-500/40 bg-gold-500/10 px-4 py-2.5 text-sm text-gold-300">
+            🔔 {incompleteCount} quest{incompleteCount > 1 ? 's' : ''} left today
+          </div>
+        )
       )}
 
       {active.length === 0 ? (

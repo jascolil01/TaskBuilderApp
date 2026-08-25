@@ -35,7 +35,13 @@ import {
   removeXp,
   SIGNATURE_LEVEL,
 } from './lib/rpg';
-import { getBossForWeek, getBossGoldReward, getBossThreshold, getWeeklyXpEarned, getWeekStart } from './lib/boss';
+import {
+  getBossForWeek,
+  getBossGoldReward,
+  getWeeklyXpEarned,
+  getWeekStart,
+  resolveBossThreshold,
+} from './lib/boss';
 import {
   COSMETIC_COST,
   COSMETIC_RINGS,
@@ -265,13 +271,18 @@ export const useStore = create<Store>()(
             return updated;
           });
 
-          // Freeze this week's boss target. Recomputing it live let a player
-          // archive a habit mid-week to lower a bar they'd already missed.
+          // The boss target is a floor, not a snapshot: archiving a quest can't
+          // lower a bar you'd already missed, but adding quests still raises it.
           const weekStart = getWeekStart(today);
+          const threshold = resolveBossThreshold(
+            habits.filter((h) => !h.archived),
+            weekStart,
+            state.bossWeek,
+          );
           const bossWeek =
-            state.bossWeek?.weekStart === weekStart
+            state.bossWeek?.weekStart === weekStart && state.bossWeek.threshold === threshold
               ? state.bossWeek
-              : { weekStart, threshold: getBossThreshold(habits.filter((h) => !h.archived)) };
+              : { weekStart, threshold };
           if (bossWeek !== state.bossWeek) changed = true;
 
           if (!changed && state.character.lastDecayCheck === today) return state;
@@ -365,6 +376,7 @@ export const useStore = create<Store>()(
           habitId: id,
           date: today,
           xpAwarded: award.xp,
+          baseXp: award.baseXp,
           goldAwarded: award.gold,
           elixirUsed: award.elixirUsed || undefined,
           prevProgress: {
@@ -778,12 +790,13 @@ export const useStore = create<Store>()(
         // to claim and nothing missed.
         if (isWeekOnVacation(state.vacations, weekStart)) return;
 
-        // Use the target frozen at the start of the week; fall back to a live
-        // figure only if this is the very first check of a fresh week.
-        const threshold =
-          state.bossWeek?.weekStart === weekStart
-            ? state.bossWeek.threshold
-            : getBossThreshold(state.habits.filter((h) => !h.archived));
+        // Resolved the same way the card resolves it, so what you're shown and
+        // what you're paid for can't drift apart between decay checks.
+        const threshold = resolveBossThreshold(
+          state.habits.filter((h) => !h.archived),
+          weekStart,
+          state.bossWeek,
+        );
         const xpEarned = getWeeklyXpEarned(state.completions, weekStart);
         if (xpEarned < threshold) return;
 

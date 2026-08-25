@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useStore } from '../store';
-import { getBossForWeek, getBossThreshold, getWeeklyXpEarned, getWeekEnd, getWeekStart } from '../lib/boss';
+import { getBossForWeek, getWeeklyXpEarned, getWeekEnd, getWeekStart, resolveBossThreshold } from '../lib/boss';
 import { parseDate, todayStr } from '../lib/date';
 import { isWeekOnVacation } from '../lib/vacation';
 import { BossMonster } from './BossMonster';
@@ -20,10 +20,7 @@ export function BossBattleCard() {
   // The target is whatever was frozen when the week began, so editing quests
   // mid-week can't move the bar you're being measured against.
   const threshold = useMemo(
-    () =>
-      bossWeek?.weekStart === weekStart
-        ? bossWeek.threshold
-        : getBossThreshold(habits.filter((h) => !h.archived)),
+    () => resolveBossThreshold(habits.filter((h) => !h.archived), weekStart, bossWeek),
     [bossWeek, weekStart, habits],
   );
   const xpEarned = useMemo(() => getWeeklyXpEarned(completions, weekStart), [completions, weekStart]);
@@ -73,7 +70,7 @@ export function BossBattleCard() {
         <XpBar level={1} xp={0} pct={pct} color={boss.color} height={10} />
       </div>
       <p className="mt-1 text-right text-[11px] text-white/35">
-        {Math.min(xpEarned, threshold)} / {threshold} XP this week
+        {Math.min(xpEarned, threshold)} / {threshold} quest XP this week
       </p>
     </div>
   );

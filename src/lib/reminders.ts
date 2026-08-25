@@ -1,9 +1,28 @@
-import type { Habit } from '../types';
+import type { CheatDayState, Habit, Vacation } from '../types';
 import { isScheduledDay } from './rpg';
 import { todayStr } from './date';
+import { getActiveVacation } from './vacation';
 
-export function getIncompleteTodayCount(habits: Habit[]): number {
+/**
+ * A day nothing is owed on: a booked vacation, a Cheat Day, or a Rest Day
+ * token. The decay pass already forgives these, so the nag has to agree with
+ * it — being told you're three quests behind on a holiday you booked, or on a
+ * rest day you spent 500 gold for, is the app arguing with itself.
+ */
+export function isRestDay(cheatDay: CheatDayState, vacations: Vacation[], date = todayStr()): boolean {
+  if (cheatDay.usedDates.includes(date)) return true;
+  return getActiveVacation(vacations, date) !== null;
+}
+
+export function getIncompleteTodayCount(
+  habits: Habit[],
+  cheatDay?: CheatDayState,
+  vacations: Vacation[] = [],
+): number {
   const today = todayStr();
+  // Callers that don't pass the forgiveness state get the raw count, which is
+  // what the quest list itself wants.
+  if (cheatDay && isRestDay(cheatDay, vacations, today)) return 0;
   return habits.filter(
     (h) => !h.archived && isScheduledDay(h, today) && h.lastCompletedDate !== today,
   ).length;

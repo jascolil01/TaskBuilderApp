@@ -49,6 +49,12 @@ export interface CompletionEntry {
   date: string;
   xpAwarded: number;
   goldAwarded: number;
+  /**
+   * The quest's face-value reward, before any perk, streak or Elixir
+   * multiplier. The weekly boss target is set in these units, so it has to be
+   * scored in them too. Absent on entries written before this was introduced.
+   */
+  baseXp?: number;
   /** Set when an Elixir of Might charge paid for this completion, so undo can refund it. */
   elixirUsed?: boolean;
   /** Absent on entries written before this was introduced. */

@@ -339,6 +339,8 @@ export function getEffectiveGraceDays(habit: Habit, attributes: Attributes): num
 
 export interface CompletionAward {
   xp: number;
+  /** The quest's face value, before every multiplier. The boss scores in this. */
+  baseXp: number;
   gold: number;
   /** XP spilled to every other attribute by Deep Work. */
   spilloverXp: number;
@@ -392,7 +394,7 @@ export function getCompletionAward(
       ? Math.floor(xp * DEEP_WORK_SPILL)
       : 0;
 
-  return { xp, gold, spilloverXp, doubled, elixirUsed: elixirActive };
+  return { xp, baseXp: habit.xpReward, gold, spilloverXp, doubled, elixirUsed: elixirActive };
 }
 
 /**
