@@ -1,5 +1,12 @@
 import { useState } from 'react';
 import { useStore } from '../store';
+import {
+  EFFORT_ORDER,
+  EFFORT_TIERS,
+  type EffortTier,
+  getEffortGold,
+  inferEffort,
+} from '../lib/effort';
 import type { AttributeKey, Frequency, Habit } from '../types';
 import { ATTRIBUTE_INFO, ATTRIBUTE_KEYS } from '../lib/rpg';
 import { weekdayLabel } from '../lib/date';
@@ -18,7 +25,7 @@ export function AddEditHabit({ habit, onClose }: { habit: Habit | null; onClose:
     habit && habit.frequency.type === 'weekly' ? habit.frequency.days : [1, 2, 3, 4, 5],
   );
   const [graceDays, setGraceDays] = useState(habit?.graceDays ?? 2);
-  const [xpReward, setXpReward] = useState(habit?.xpReward ?? 15);
+  const [effort, setEffort] = useState<EffortTier>(habit?.effort ?? inferEffort(habit?.xpReward ?? 20));
 
   const toggleDay = (d: number) => setDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
 
@@ -28,9 +35,9 @@ export function AddEditHabit({ habit, onClose }: { habit: Habit | null; onClose:
     if (!canSave) return;
     const frequency: Frequency = isDaily ? { type: 'daily' } : { type: 'weekly', days };
     if (habit) {
-      updateHabit(habit.id, { name, attribute, frequency, graceDays, xpReward });
+      updateHabit(habit.id, { name, attribute, frequency, graceDays, effort });
     } else {
-      addHabit({ name, attribute, frequency, graceDays, xpReward });
+      addHabit({ name, attribute, frequency, graceDays, effort });
     }
     onClose();
   };
@@ -120,16 +127,40 @@ export function AddEditHabit({ habit, onClose }: { habit: Habit | null; onClose:
           attribute starts losing XP each day until you complete it again.
         </p>
 
-        <label className="mt-5 block text-xs uppercase tracking-wide text-white/50">XP reward: {xpReward}</label>
-        <input
-          type="range"
-          min={5}
-          max={50}
-          step={5}
-          value={xpReward}
-          onChange={(e) => setXpReward(Number(e.target.value))}
-          className="mt-2 w-full accent-[var(--color-gold-500)]"
-        />
+        <label className="mt-5 block text-xs uppercase tracking-wide text-white/50">How much work is it?</label>
+        <p className="mt-0.5 text-[11px] text-white/30">
+          Roughly how long it takes. Nothing is timed — it just sets what the quest is worth.
+        </p>
+        <div className="mt-2 flex flex-col gap-2">
+          {EFFORT_ORDER.map((key) => {
+            const info = EFFORT_TIERS[key];
+            const selected = effort === key;
+            return (
+              <button
+                key={key}
+                onClick={() => setEffort(key)}
+                className={`rounded-lg border px-3 py-2.5 text-left transition-colors ${
+                  selected ? 'border-gold-500 bg-gold-500/15' : 'border-white/15'
+                }`}
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className={`font-display font-semibold ${selected ? 'text-gold-300' : 'text-white/70'}`}>
+                    {info.label}
+                  </span>
+                  <span className={`shrink-0 text-xs ${selected ? 'text-gold-300' : 'text-white/45'}`}>
+                    {info.xp} XP · 🪙 {getEffortGold(key)}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[11px] text-white/40">{info.time}</p>
+                <p className="mt-0.5 text-[11px] text-white/30">{info.hint}</p>
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-2 text-[11px] text-white/30">
+          Harder quests are worth far more XP, but only a little more gold — so rating a quest high moves your
+          character faster without making real rewards cheaper.
+        </p>
 
         <div className="mt-7 flex gap-2">
           <button

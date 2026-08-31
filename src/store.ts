@@ -60,6 +60,7 @@ import {
   isWeekOnVacation,
   validateVacation,
 } from './lib/vacation';
+import { type EffortTier, getEffortXp, inferEffort } from './lib/effort';
 import { getGear, isValidGearId, withEquipped, withoutEquipped } from './lib/gear';
 import { canChangeTier, getClassReward, getCooldown } from './lib/rewards';
 import { parseBackup } from './lib/backup';
@@ -74,7 +75,7 @@ function starterHabits(): Habit[] {
   const base = (
     name: string,
     attribute: AttributeKey,
-    xpReward: number,
+    effort: EffortTier,
     frequency: Frequency = { type: 'daily' },
   ): Habit => ({
     id: makeId(),
@@ -82,7 +83,8 @@ function starterHabits(): Habit[] {
     attribute,
     frequency,
     graceDays: 2,
-    xpReward,
+    effort,
+    xpReward: getEffortXp(effort),
     streak: 0,
     bestStreak: 0,
     lastCompletedDate: null,
@@ -93,9 +95,9 @@ function starterHabits(): Habit[] {
   });
 
   return [
-    base('Morning workout', 'STR', 20),
-    base('Read for 20 minutes', 'INT', 15),
-    base('Lights out by midnight', 'CON', 10),
+    base('Morning workout', 'STR', 'real'),
+    base('Read for 20 minutes', 'INT', 'short'),
+    base('Lights out by midnight', 'CON', 'quick'),
   ];
 }
 
@@ -133,9 +135,12 @@ interface Store {
     attribute: AttributeKey;
     frequency: Frequency;
     graceDays: number;
-    xpReward: number;
+    effort: EffortTier;
   }) => void;
-  updateHabit: (id: string, patch: Partial<Pick<Habit, 'name' | 'attribute' | 'frequency' | 'graceDays' | 'xpReward'>>) => void;
+  updateHabit: (
+    id: string,
+    patch: Partial<Pick<Habit, 'name' | 'attribute' | 'frequency' | 'graceDays' | 'effort'>>,
+  ) => void;
   archiveHabit: (id: string) => void;
   deleteHabit: (id: string) => void;
   completeHabit: (id: string) => void;
@@ -336,7 +341,8 @@ export const useStore = create<Store>()(
               attribute: input.attribute,
               frequency: input.frequency,
               graceDays: input.graceDays,
-              xpReward: input.xpReward,
+              effort: input.effort,
+              xpReward: getEffortXp(input.effort),
               streak: 0,
               bestStreak: 0,
               lastCompletedDate: null,
@@ -350,7 +356,12 @@ export const useStore = create<Store>()(
 
       updateHabit: (id, patch) =>
         set((state) => ({
-          habits: state.habits.map((h) => (h.id === id ? { ...h, ...patch } : h)),
+          habits: state.habits.map((h) =>
+            // xpReward is derived from the tier, so it has to move with it.
+            h.id === id
+              ? { ...h, ...patch, ...(patch.effort ? { xpReward: getEffortXp(patch.effort) } : {}) }
+              : h,
+          ),
         })),
 
       archiveHabit: (id) =>
@@ -1073,7 +1084,7 @@ export const useStore = create<Store>()(
     }),
     {
       name: 'questlog-rpg-storage',
-      version: 5,
+      version: 6,
       migrate: (persisted, fromVersion) => {
         const state = persisted as Partial<Store> & { character?: Partial<CharacterState> };
         if (!state?.character) return state as Store;
@@ -1099,8 +1110,17 @@ export const useStore = create<Store>()(
             ),
           },
         };
+        // v6: quests carry an effort tier. Inferred from the hand-set XP the
+        // old slider produced, which can nudge a value to the nearest tier
+        // (a 15 XP quest becomes Short at 10 or Real at 20).
+        const withEffort = (Array.isArray(state.habits) ? state.habits : []).map((h) => {
+          if (h.effort) return h;
+          const effort = inferEffort(h.xpReward ?? 20);
+          return { ...h, effort, xpReward: getEffortXp(effort) };
+        });
+
         if (fromVersion >= 4) {
-          return { ...state, character: withGear } as Store;
+          return { ...state, character: withGear, habits: withEffort } as Store;
         }
 
         // v1 had no lifetimeXp and no cheat-day state. Seed lifetime XP from
@@ -1135,6 +1155,9 @@ export const useStore = create<Store>()(
               createdAt: legacy.createdAt,
             };
           }),
+          // v6: `...state` above carries the untouched habits, so the effort
+          // mapping has to be reapplied here or the oldest saves would skip it.
+          habits: withEffort,
           bossWeek: null,
           // v4: vacations.
           vacations: Array.isArray(state.vacations) ? state.vacations : [],

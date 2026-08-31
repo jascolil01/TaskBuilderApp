@@ -1,6 +1,7 @@
 import { useStore } from '../store';
 import type { Habit } from '../types';
-import { ATTRIBUTE_INFO, GOLD_PER_XP, isAtRisk, isDecaying, isScheduledDay } from '../lib/rpg';
+import { ATTRIBUTE_INFO, isAtRisk, isDecaying, isScheduledDay } from '../lib/rpg';
+import { getEffortGold, inferEffort } from '../lib/effort';
 import { addDays, todayStr, weekdayLabel } from '../lib/date';
 
 export function HabitCard({
@@ -68,7 +69,7 @@ export function HabitCard({
             </span>
             <span className="shrink-0 text-right text-xs font-display" style={{ color: info.color }}>
               +{habit.xpReward} {habit.attribute}
-              <span className="ml-1.5 text-gold-400/80">🪙{habit.xpReward * GOLD_PER_XP}</span>
+              <span className="ml-1.5 text-gold-400/80">🪙{getEffortGold(habit.effort ?? inferEffort(habit.xpReward))}</span>
             </span>
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-white/40">

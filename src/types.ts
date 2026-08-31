@@ -1,3 +1,4 @@
+import type { EffortTier } from './lib/effort';
 import type { RewardTier } from './lib/shop';
 
 export type AttributeKey = 'STR' | 'DEX' | 'CON' | 'INT' | 'WIS' | 'CHA';
@@ -17,6 +18,14 @@ export interface Habit {
   attribute: AttributeKey;
   frequency: Frequency;
   graceDays: number;
+  /**
+   * How much work this quest is. Drives xpReward, and separately sets the
+   * modest difficulty bonus on gold. Absent on quests created before effort
+   * tiers existed; the migration infers it from xpReward.
+   */
+  effort?: EffortTier;
+  /** Always the tier's XP value. Kept denormalised — decay, the boss target
+   *  and the stats screen all read it directly. */
   xpReward: number;
   streak: number;
   bestStreak: number;

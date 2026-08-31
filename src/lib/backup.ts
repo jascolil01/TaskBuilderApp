@@ -13,6 +13,7 @@ import type {
   Reward,
   Vacation,
 } from '../types';
+import { getEffortXp, inferEffort, isEffortTier } from './effort';
 import { ATTRIBUTE_KEYS, SIGNATURE_LEVEL } from './rpg';
 import {
   COSMETIC_RINGS,
@@ -184,6 +185,10 @@ function parseHabit(raw: unknown): Habit | null {
   if (typeof raw.attribute !== 'string' || !ATTRIBUTE_KEYS.includes(raw.attribute as AttributeKey)) return null;
   const frequency = parseFrequency(raw.frequency);
   if (!frequency) return null;
+  // Older backups predate effort tiers; fall back to the XP they recorded.
+  const effort = isEffortTier(raw.effort)
+    ? raw.effort
+    : inferEffort(Math.max(1, Math.floor(finiteNum(raw.xpReward, 20))));
 
   return {
     id: raw.id,
@@ -191,7 +196,10 @@ function parseHabit(raw: unknown): Habit | null {
     attribute: raw.attribute as AttributeKey,
     frequency,
     graceDays: Math.max(0, Math.floor(finiteNum(raw.graceDays, 2))),
-    xpReward: Math.max(1, Math.floor(finiteNum(raw.xpReward, 10))),
+    // XP is the tier's value, never a free number — an imported file can't
+    // smuggle in a 500 XP quest by editing the field directly.
+    effort,
+    xpReward: getEffortXp(effort),
     streak: Math.max(0, Math.floor(finiteNum(raw.streak, 0))),
     bestStreak: Math.max(0, Math.floor(finiteNum(raw.bestStreak, 0))),
     lastCompletedDate: nullableDate(raw.lastCompletedDate),

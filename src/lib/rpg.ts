@@ -1,5 +1,6 @@
 import type { AttributeKey, AttributeState, Attributes, Habit } from '../types';
 import { addDays, dayOfWeek } from './date';
+import { getEffortGold, inferEffort } from './effort';
 
 export const ATTRIBUTE_KEYS: AttributeKey[] = ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA'];
 
@@ -187,7 +188,6 @@ export function processHabitDecay(habit: Habit, today: string, options: DecayOpt
   };
 }
 
-export const GOLD_PER_XP = 1;
 export const STREAK_SAVE_COST = 120;
 
 export interface Tier {
@@ -395,12 +395,17 @@ export function getCompletionAward(
 
   const xpBeforeElixir = Math.max(1, Math.round(habit.xpReward * xpMultiplier));
 
-  // Gold is deliberately based on the pre-elixir figure. If an Elixir also
-  // doubled gold it could out-earn its own price, turning the shop into a
-  // money printer.
+  // Gold is paid for doing a quest at all, with difficulty as a gentle bonus —
+  // NOT as a multiple of XP. Tying it to XP meant a quest's rating was also a
+  // dial on your real-world buying power, and rating everything Major turned
+  // the Legendary reward's advertised two months into twelve days.
+  //
+  // It also stays clear of the Elixir: if an Elixir doubled gold it could
+  // out-earn its own price, turning the shop into a money printer.
   let goldMultiplier = bonuses.goldMultiplier;
   if (hasSignature(attributes, 'patron')) goldMultiplier *= 1 + PATRON_GOLD_BONUS;
-  const gold = Math.max(0, Math.round(xpBeforeElixir * GOLD_PER_XP * goldMultiplier));
+  const effort = habit.effort ?? inferEffort(habit.xpReward);
+  const gold = Math.max(0, Math.round(getEffortGold(effort) * goldMultiplier));
 
   const xp = elixirActive ? xpBeforeElixir * ELIXIR_XP_MULTIPLIER : xpBeforeElixir;
 
