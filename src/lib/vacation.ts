@@ -61,12 +61,6 @@ export function vacationsRemainingThisYear(vacations: Vacation[], today: string)
   return Math.max(0, MAX_VACATIONS_PER_YEAR - countVacationsInYear(vacations, year));
 }
 
-/** True when any day of the week starting `weekStart` is covered by a vacation. */
-export function isWeekOnVacation(vacations: Vacation[], weekStart: string): boolean {
-  const weekEnd = addDays(weekStart, 6);
-  return vacations.some((v) => v.startDate <= weekEnd && getEffectiveEnd(v) >= weekStart);
-}
-
 export type VacationCheck = { ok: true } | { ok: false; error: string };
 
 export function validateVacation(

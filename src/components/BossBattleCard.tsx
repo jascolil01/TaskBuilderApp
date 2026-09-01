@@ -1,8 +1,15 @@
 import { useMemo } from 'react';
 import { useStore } from '../store';
-import { getBossForWeek, getWeeklyXpEarned, getWeekEnd, getWeekStart, resolveBossThreshold } from '../lib/boss';
+import {
+  getBossForWeek,
+  getPresentFraction,
+  getWeeklyXpEarned,
+  getWeekEnd,
+  getWeekStart,
+  resolveBossThreshold,
+} from '../lib/boss';
 import { parseDate, todayStr } from '../lib/date';
-import { isWeekOnVacation } from '../lib/vacation';
+import { getVacationDates } from '../lib/vacation';
 import { BossMonster } from './BossMonster';
 import { XpBar } from './XpBar';
 
@@ -19,19 +26,22 @@ export function BossBattleCard() {
   const boss = useMemo(() => getBossForWeek(weekStart), [weekStart]);
   // The target is whatever was frozen when the week began, so editing quests
   // mid-week can't move the bar you're being measured against.
+  const away = useMemo(() => new Set(getVacationDates(vacations)), [vacations]);
+  const active = useMemo(() => habits.filter((h) => !h.archived), [habits]);
   const threshold = useMemo(
-    () => resolveBossThreshold(habits.filter((h) => !h.archived), weekStart, bossWeek),
-    [bossWeek, weekStart, habits],
+    () => resolveBossThreshold(active, weekStart, bossWeek, away),
+    [bossWeek, weekStart, active, away],
   );
+  // Below 1 means a vacation covered every scheduled day this week.
+  const present = useMemo(() => getPresentFraction(active, weekStart, away), [active, weekStart, away]);
+  const reducedBy = Math.round((1 - present) * 100);
   const xpEarned = useMemo(() => getWeeklyXpEarned(completions, weekStart), [completions, weekStart]);
   const victory = bossVictories.find((v) => v.weekStart === weekStart);
-  const onVacation = isWeekOnVacation(vacations, weekStart);
   const pct = Math.min(100, Math.round((xpEarned / threshold) * 100));
   const daysLeft = Math.max(0, Math.round((parseDate(weekEnd).getTime() - parseDate(today).getTime()) / 86400000));
 
-  // No boss stalks a week you were away for — showing an unbeatable bar would
-  // just read as a loss you can't do anything about.
-  if (onVacation && !victory) {
+  // Only a week you were away for *entirely* has no boss at all.
+  if (threshold <= 0 && !victory) {
     return (
       <div className="parchment-border rounded-xl bg-ink-800/50 p-4">
         <div className="flex items-center gap-3 opacity-50 grayscale">
@@ -40,7 +50,7 @@ export function BossBattleCard() {
             <p className="font-display font-semibold" style={{ color: boss.color }}>
               {boss.name}
             </p>
-            <p className="text-[11px] text-white/40">Sleeping — no boss while you're on vacation</p>
+            <p className="text-[11px] text-white/40">Sleeping — you were away all week</p>
           </div>
           <span className="shrink-0 text-lg">💤</span>
         </div>
@@ -72,6 +82,11 @@ export function BossBattleCard() {
       <p className="mt-1 text-right text-[11px] text-white/35">
         {Math.min(xpEarned, threshold)} / {threshold} quest XP this week
       </p>
+      {reducedBy > 0 && (
+        <p className="mt-0.5 text-right text-[11px] text-mana-400/70">
+          Target cut {reducedBy}% — you were away part of this week
+        </p>
+      )}
     </div>
   );
 }

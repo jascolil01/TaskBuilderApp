@@ -57,7 +57,6 @@ import {
 import {
   getActiveVacation,
   getVacationDates,
-  isWeekOnVacation,
   validateVacation,
 } from './lib/vacation';
 import { type EffortTier, getEffortXp, inferEffort } from './lib/effort';
@@ -281,6 +280,7 @@ export const useStore = create<Store>()(
             habits.filter((h) => !h.archived),
             weekStart,
             state.bossWeek,
+            new Set(forgivenDates),
           );
           const bossWeek =
             state.bossWeek?.weekStart === weekStart && state.bossWeek.threshold === threshold
@@ -991,17 +991,17 @@ export const useStore = create<Store>()(
         const today = todayStr();
         const weekStart = getWeekStart(today);
         if (state.bossVictories.some((v) => v.weekStart === weekStart)) return;
-        // A week you were away for has no boss to defeat, so there is nothing
-        // to claim and nothing missed.
-        if (isWeekOnVacation(state.vacations, weekStart)) return;
-
         // Resolved the same way the card resolves it, so what you're shown and
-        // what you're paid for can't drift apart between decay checks.
+        // what you're paid for can't drift apart between decay checks. A
+        // vacation shrinks the target; only a week you were away for entirely
+        // drops it to zero, and then there is no boss to defeat.
         const threshold = resolveBossThreshold(
           state.habits.filter((h) => !h.archived),
           weekStart,
           state.bossWeek,
+          new Set(getVacationDates(state.vacations)),
         );
+        if (threshold <= 0) return;
         const xpEarned = getWeeklyXpEarned(state.completions, weekStart);
         if (xpEarned < threshold) return;
 
