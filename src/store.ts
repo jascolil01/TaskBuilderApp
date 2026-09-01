@@ -61,6 +61,7 @@ import {
   validateVacation,
 } from './lib/vacation';
 import { type EffortTier, getEffortXp, inferEffort } from './lib/effort';
+import { getTemplate } from './lib/questCatalog';
 import { getGear, isValidGearId, withEquipped, withoutEquipped } from './lib/gear';
 import { canChangeTier, getClassReward, getCooldown } from './lib/rewards';
 import { parseBackup } from './lib/backup';
@@ -70,36 +71,8 @@ function makeId(): string {
   return crypto.randomUUID();
 }
 
-function starterHabits(): Habit[] {
-  const now = new Date().toISOString();
-  const base = (
-    name: string,
-    attribute: AttributeKey,
-    effort: EffortTier,
-    frequency: Frequency = { type: 'daily' },
-  ): Habit => ({
-    id: makeId(),
-    name,
-    attribute,
-    frequency,
-    graceDays: 2,
-    effort,
-    xpReward: getEffortXp(effort),
-    streak: 0,
-    bestStreak: 0,
-    lastCompletedDate: null,
-    decayedThroughDate: null,
-    missedSinceCompletion: 0,
-    createdAt: now,
-    archived: false,
-  });
-
-  return [
-    base('Morning workout', 'STR', 'real'),
-    base('Read for 20 minutes', 'INT', 'short'),
-    base('Lights out by midnight', 'CON', 'quick'),
-  ];
-}
+/** Used only when someone skips the picker, so nobody lands on an empty log. */
+const DEFAULT_STARTERS = ['con-water', 'wis-bed', 'int-read'];
 
 function starterRewards(): Reward[] {
   const now = new Date().toISOString();
@@ -126,10 +99,12 @@ interface Store {
 
   setCharacterName: (name: string) => void;
   setPreferredClass: (attribute: AttributeKey | null) => void;
+  startJourney: (name: string, templateIds: string[]) => void;
   spendCheatDay: () => void;
   setReminderSettings: (patch: Partial<Pick<ReminderSettings, 'enabled' | 'time'>>) => void;
   markReminderNotified: (date: string) => void;
   runDecayCheck: () => void;
+  addFromTemplates: (templateIds: string[]) => number;
   addHabit: (input: {
     name: string;
     attribute: AttributeKey;
@@ -191,7 +166,8 @@ function createInitialState() {
       preferredClass: null as AttributeKey | null,
       lastDecayCheck: todayStr(),
     },
-    habits: starterHabits(),
+    // Quests are chosen during onboarding now, not handed out.
+    habits: [] as Habit[],
     completions: [] as CompletionEntry[],
     rewards: starterRewards(),
     redemptions: [] as RedemptionEntry[],
@@ -238,6 +214,16 @@ export const useStore = create<Store>()(
        * Only meaningful while attributes are tied for the lead; the getter
        * ignores a stale preference, so nothing here needs to police it.
        */
+      /**
+       * Finishes onboarding. Naming the character is what unlocks the app, so
+       * it happens last — after the quests are in — or the first render would
+       * flash an empty quest log.
+       */
+      startJourney: (name, templateIds) => {
+        get().addFromTemplates(templateIds.length > 0 ? templateIds : DEFAULT_STARTERS);
+        get().setCharacterName(name || 'Adventurer');
+      },
+
       setPreferredClass: (attribute) =>
         set((state) => ({ character: { ...state.character, preferredClass: attribute } })),
 
@@ -329,6 +315,42 @@ export const useStore = create<Store>()(
             },
           },
         }));
+      },
+
+      /**
+       * Adds ready-made quests from the catalog. Skips anything already on the
+       * list by name, so browsing twice can't quietly give you two copies of
+       * the same habit. Returns how many were actually added.
+       */
+      addFromTemplates: (templateIds) => {
+        const state = get();
+        const existing = new Set(state.habits.map((h) => h.name.trim().toLowerCase()));
+        const now = new Date().toISOString();
+        const fresh: Habit[] = [];
+        for (const id of templateIds) {
+          const template = getTemplate(id);
+          if (!template) continue;
+          if (existing.has(template.name.trim().toLowerCase())) continue;
+          existing.add(template.name.trim().toLowerCase());
+          fresh.push({
+            id: makeId(),
+            name: template.name,
+            attribute: template.attribute,
+            frequency: template.frequency,
+            graceDays: template.graceDays,
+            effort: template.effort,
+            xpReward: getEffortXp(template.effort),
+            streak: 0,
+            bestStreak: 0,
+            lastCompletedDate: null,
+            decayedThroughDate: null,
+            missedSinceCompletion: 0,
+            createdAt: now,
+            archived: false,
+          });
+        }
+        if (fresh.length > 0) set((s) => ({ habits: [...s.habits, ...fresh] }));
+        return fresh.length;
       },
 
       addHabit: (input) =>

@@ -7,10 +7,12 @@ import { getIncompleteTodayCount, isRestDay } from '../lib/reminders';
 import { getActiveVacation } from '../lib/vacation';
 import { isScheduledDay } from '../lib/rpg';
 import { AddEditHabit } from './AddEditHabit';
+import { QuestBrowser } from './QuestBrowser';
 
 export function QuestLog() {
   const habits = useStore((s) => s.habits);
   const [editing, setEditing] = useState<Habit | 'new' | null>(null);
+  const [browsing, setBrowsing] = useState(false);
 
   const active = habits.filter((h) => !h.archived);
   const archived = habits.filter((h) => h.archived);
@@ -48,12 +50,20 @@ export function QuestLog() {
     <div className="flex flex-col gap-4 px-4 pb-28 pt-6">
       <div className="flex items-center justify-between">
         <h1 className="font-display text-xl font-bold text-gold-300">Quest Log</h1>
-        <button
-          onClick={() => setEditing('new')}
-          className="rounded-full border border-gold-500/60 bg-gold-500/10 px-4 py-1.5 text-sm font-medium text-gold-300 active:scale-95"
-        >
-          + New Quest
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setBrowsing(true)}
+            className="rounded-full border border-white/20 px-3.5 py-1.5 text-sm font-medium text-white/65 active:scale-95"
+          >
+            💡 Ideas
+          </button>
+          <button
+            onClick={() => setEditing('new')}
+            className="rounded-full border border-gold-500/60 bg-gold-500/10 px-4 py-1.5 text-sm font-medium text-gold-300 active:scale-95"
+          >
+            + New
+          </button>
+        </div>
       </div>
 
       {restDay ? (
@@ -73,7 +83,13 @@ export function QuestLog() {
         <div className="parchment-border mt-4 rounded-2xl bg-ink-800/50 p-6 text-center text-white/60">
           <p className="text-3xl">📜</p>
           <p className="mt-2 font-display text-gold-300">Your quest log is empty</p>
-          <p className="mt-1 text-sm">Add a habit to start earning XP and training your character.</p>
+          <p className="mt-1 text-sm">Not sure where to start? Browse ready-made quests, already set up.</p>
+          <button
+            onClick={() => setBrowsing(true)}
+            className="mt-4 rounded-full bg-gold-500 px-5 py-2 text-sm font-semibold text-ink-950 active:scale-95"
+          >
+            💡 Browse quest ideas
+          </button>
         </div>
       ) : (
         <>
@@ -121,6 +137,7 @@ export function QuestLog() {
       )}
 
       {editing && <AddEditHabit habit={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
+      {browsing && <QuestBrowser onClose={() => setBrowsing(false)} />}
     </div>
   );
 }
