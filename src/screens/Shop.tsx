@@ -54,8 +54,8 @@ export function Shop() {
   const redemptions = useStore((s) => s.redemptions);
   const today = todayStr();
   const classRewards = useMemo(() => getClassRewards(classAttribute), [classAttribute]);
-  const cooldownFor = (id: string, tier: Parameters<typeof getRewardCost>[0]) =>
-    getCooldown(id, tier, redemptions, today);
+  const cooldownFor = (id: string, tier: Parameters<typeof getRewardCost>[0], name: string) =>
+    getCooldown(id, tier, redemptions, today, name);
 
   const restorable = useMemo(
     () => habits.filter((h) => !h.archived && (h.lastBrokenStreak ?? 0) > 0),
@@ -131,7 +131,7 @@ export function Shop() {
                 tier={reward.tier}
                 cost={reward.cost}
                 gold={gold}
-                cooldown={cooldownFor(reward.id, reward.tier)}
+                cooldown={cooldownFor(reward.id, reward.tier, reward.name)}
                 curated
                 onRedeem={() => redeemReward(reward.id)}
               />
@@ -168,7 +168,7 @@ export function Shop() {
                     tier={reward.tier}
                     cost={cost}
                     gold={gold}
-                    cooldown={cooldownFor(reward.id, reward.tier)}
+                    cooldown={cooldownFor(reward.id, reward.tier, reward.name)}
                     onEdit={() => setEditing(reward)}
                     onRedeem={() => redeemReward(reward.id)}
                   />

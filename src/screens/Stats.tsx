@@ -2,7 +2,13 @@ import { useMemo } from 'react';
 import { useStore } from '../store';
 import { ATTRIBUTE_INFO, ATTRIBUTE_KEYS } from '../lib/rpg';
 import { todayStr } from '../lib/date';
-import { formatWeekLabel, getAttributeTrend, getQuestStats, getWeekdayStats } from '../lib/stats';
+import {
+  formatWeekLabel,
+  getAttributeTrend,
+  getQuestStats,
+  getWeekdayStats,
+  RATE_WINDOW_DAYS,
+} from '../lib/stats';
 
 function rateColor(rate: number): string {
   if (rate >= 80) return 'var(--color-verdant-500)';
@@ -31,7 +37,9 @@ export function Stats({ onClose }: { onClose: () => void }) {
         <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-white/20" />
         <h2 className="font-display text-lg font-bold text-gold-300">Statistics</h2>
 
-        <h3 className="mt-5 font-display text-sm uppercase tracking-widest text-white/50">Per quest</h3>
+        <h3 className="mt-5 font-display text-sm uppercase tracking-widest text-white/50">
+          Per quest · last {RATE_WINDOW_DAYS} days
+        </h3>
         {quests.length === 0 ? (
           <p className="mt-2 text-xs text-white/35">No active quests to measure yet.</p>
         ) : (

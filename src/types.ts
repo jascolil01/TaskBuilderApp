@@ -68,6 +68,12 @@ export interface CompletionEntry {
   elixirUsed?: boolean;
   /** Logged after the fact rather than on the day, so the Chronicle can say so. */
   backfilled?: boolean;
+  /**
+   * Decay XP handed back because this backfill cancelled a miss. Recorded so
+   * undo can reverse exactly what was given, rather than guessing — the same
+   * reason prevProgress exists.
+   */
+  xpRefunded?: number;
   /** Absent on entries written before this was introduced. */
   prevProgress?: HabitProgressSnapshot;
 }

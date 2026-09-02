@@ -119,20 +119,31 @@ export interface CooldownState {
   daysLeft: number;
 }
 
+const normalise = (name: string) => name.trim().toLowerCase();
+
 /**
  * Whether a reward is still resting, given every redemption ever logged.
  * Reads the redemption log rather than storing per-reward timestamps, so it
  * stays correct through imports and can't drift out of sync.
+ *
+ * Matching is by id OR by name, not id alone. Ids are minted fresh on create,
+ * so keying on the id alone meant "claim it, delete it, add it back" handed
+ * you the same treat again the same day — the rest period was one tap from
+ * being nothing at all.
  */
 export function getCooldown(
   rewardId: string,
   tier: RewardTier,
-  redemptions: readonly { rewardId: string; date: string }[],
+  redemptions: readonly { rewardId: string; rewardName?: string; date: string }[],
   today: string,
+  rewardName?: string,
 ): CooldownState {
+  const wanted = rewardName ? normalise(rewardName) : null;
   let last: string | null = null;
   for (const r of redemptions) {
-    if (r.rewardId !== rewardId) continue;
+    const sameReward =
+      r.rewardId === rewardId || (wanted !== null && r.rewardName !== undefined && normalise(r.rewardName) === wanted);
+    if (!sameReward) continue;
     if (last === null || r.date > last) last = r.date;
   }
   if (last === null) return { active: false, availableOn: null, daysLeft: 0 };

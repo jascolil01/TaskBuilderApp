@@ -61,6 +61,7 @@ import {
 } from './lib/vacation';
 import { type EffortTier, getEffortXp, inferEffort } from './lib/effort';
 import { getTemplate } from './lib/questCatalog';
+import { getForgivenDates, getForgivenSet } from './lib/forgiveness';
 import { getGear, isValidGearId, withEquipped, withoutEquipped } from './lib/gear';
 import { canChangeTier, getClassReward, getCooldown } from './lib/rewards';
 import { parseBackup } from './lib/backup';
@@ -72,6 +73,9 @@ function makeId(): string {
 
 /** Used only when someone skips the picker, so nobody lands on an empty log. */
 const DEFAULT_STARTERS = ['con-water', 'wis-bed', 'int-read'];
+
+/** Persisted schema version. Backups are stamped with it, so they agree. */
+export const SCHEMA_VERSION = 6;
 
 function starterRewards(): Reward[] {
   const now = new Date().toISOString();
@@ -118,7 +122,7 @@ interface Store {
   archiveHabit: (id: string) => void;
   deleteHabit: (id: string) => void;
   completeHabit: (id: string) => void;
-  undoCompleteHabit: (id: string) => void;
+  undoCompleteHabit: (id: string, date?: string) => void;
   backfillYesterday: (id: string) => void;
 
   addReward: (input: { name: string; tier: RewardTier }) => void;
@@ -132,7 +136,7 @@ interface Store {
   setCosmetic: (kind: 'title' | 'ring', id: string | null) => void;
   buyGear: (id: string) => void;
   setGearEquipped: (id: string, equipped: boolean) => void;
-  claimBossVictory: () => void;
+  claimBossVictory: (forWeekStart?: string) => void;
 
   scheduleVacation: (startDate: string, endDate: string) => { ok: boolean; error?: string };
   cancelVacation: (id: string) => void;
@@ -236,10 +240,7 @@ export const useStore = create<Store>()(
           const baseAttributes = state.character.attributes;
           // A vacation is simply a range of forgiven days, so it rides the
           // same path the Cheat Day already uses.
-          const forgivenDates = [
-            ...state.character.cheatDay.usedDates,
-            ...getVacationDates(state.vacations),
-          ];
+          const forgivenDates = getForgivenDates(state.character.cheatDay, state.vacations);
           let attributes = { ...baseAttributes };
           let streakSaves = state.character.streakSaves;
           let changed = false;
@@ -554,6 +555,7 @@ export const useStore = create<Store>()(
           baseXp: award.baseXp,
           goldAwarded: award.gold,
           backfilled: true,
+          ...(plan.xpRefund > 0 ? { xpRefunded: plan.xpRefund } : {}),
           prevProgress: {
             streak: habit.streak,
             bestStreak: habit.bestStreak,
@@ -625,15 +627,26 @@ export const useStore = create<Store>()(
         });
 
         get().claimBossVictory();
+        // The completion landed on yesterday, which may belong to last week.
+        const backfilledWeek = getWeekStart(yesterday);
+        if (backfilledWeek !== getWeekStart(today)) get().claimBossVictory(backfilledWeek);
       },
 
-      undoCompleteHabit: (id) => {
+      /**
+       * `date` defaults to today. A backfilled day can be undone too: it used
+       * to be permanent, because the guard demanded lastCompletedDate === today
+       * and a backfill leaves that at yesterday.
+       */
+      undoCompleteHabit: (id, date) => {
         const today = todayStr();
+        const target = date ?? today;
         const state = get();
         const habit = state.habits.find((h) => h.id === id);
-        if (!habit || habit.lastCompletedDate !== today) return;
+        if (!habit) return;
+        // One day back at most, matching what backfill can create.
+        if (target !== today && target !== addDays(today, -1)) return;
 
-        const todaysEntry = [...state.completions].reverse().find((c) => c.habitId === id && c.date === today);
+        const todaysEntry = [...state.completions].reverse().find((c) => c.habitId === id && c.date === target);
         if (!todaysEntry) return;
 
         // The gold from this completion may already be spent. Clamping the
@@ -666,9 +679,12 @@ export const useStore = create<Store>()(
             };
 
         set((s) => {
+          // The attribute got the award plus any decay refund; lifetime XP got
+          // only the award, since a refund is XP returned rather than earned.
+          const refunded = todaysEntry.xpRefunded ?? 0;
           const attributes: Attributes = {
             ...s.character.attributes,
-            [habit.attribute]: removeXp(s.character.attributes[habit.attribute], todaysEntry.xpAwarded),
+            [habit.attribute]: removeXp(s.character.attributes[habit.attribute], todaysEntry.xpAwarded + refunded),
           };
 
           // Mirror the Deep Work spillover this completion handed out, so the
@@ -759,7 +775,7 @@ export const useStore = create<Store>()(
           if (curated.attribute !== attribute) return;
         }
 
-        const cooldown = getCooldown(id, tier, state.redemptions, today);
+        const cooldown = getCooldown(id, tier, state.redemptions, today, name);
         if (cooldown.active) {
           useToastStore
             .getState()
@@ -986,10 +1002,16 @@ export const useStore = create<Store>()(
           };
         }),
 
-      claimBossVictory: () => {
+      /**
+       * `forWeekStart` defaults to this week. Backfilling on a Sunday writes a
+       * completion into *last* week, and with only the current week ever
+       * checked that week's boss could never be paid however far past the
+       * threshold the backfill pushed it.
+       */
+      claimBossVictory: (forWeekStart) => {
         const state = get();
         const today = todayStr();
-        const weekStart = getWeekStart(today);
+        const weekStart = forWeekStart ?? getWeekStart(today);
         if (state.bossVictories.some((v) => v.weekStart === weekStart)) return;
         // Resolved the same way the card resolves it, so what you're shown and
         // what you're paid for can't drift apart between decay checks. A
@@ -999,7 +1021,7 @@ export const useStore = create<Store>()(
           state.habits.filter((h) => !h.archived),
           weekStart,
           state.bossWeek,
-          new Set(getVacationDates(state.vacations)),
+          getForgivenSet(state.character.cheatDay, state.vacations),
         );
         if (threshold <= 0) return;
         const xpEarned = getWeeklyXpEarned(state.completions, weekStart);
@@ -1068,7 +1090,7 @@ export const useStore = create<Store>()(
           get();
         return JSON.stringify(
           {
-            version: 5,
+            version: SCHEMA_VERSION,
             exportedAt: new Date().toISOString(),
             character,
             habits,
@@ -1106,7 +1128,7 @@ export const useStore = create<Store>()(
     }),
     {
       name: 'questlog-rpg-storage',
-      version: 6,
+      version: SCHEMA_VERSION,
       migrate: (persisted, fromVersion) => {
         const state = persisted as Partial<Store> & { character?: Partial<CharacterState> };
         if (!state?.character) return state as Store;

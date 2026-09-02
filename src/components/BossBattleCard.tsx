@@ -9,7 +9,7 @@ import {
   resolveBossThreshold,
 } from '../lib/boss';
 import { parseDate, todayStr } from '../lib/date';
-import { getVacationDates } from '../lib/vacation';
+import { getForgivenSet } from '../lib/forgiveness';
 import { BossMonster } from './BossMonster';
 import { XpBar } from './XpBar';
 
@@ -19,6 +19,7 @@ export function BossBattleCard() {
   const bossVictories = useStore((s) => s.bossVictories);
   const bossWeek = useStore((s) => s.bossWeek);
   const vacations = useStore((s) => s.vacations);
+  const cheatDay = useStore((s) => s.character.cheatDay);
 
   const today = todayStr();
   const weekStart = getWeekStart(today);
@@ -26,7 +27,9 @@ export function BossBattleCard() {
   const boss = useMemo(() => getBossForWeek(weekStart), [weekStart]);
   // The target is whatever was frozen when the week began, so editing quests
   // mid-week can't move the bar you're being measured against.
-  const away = useMemo(() => new Set(getVacationDates(vacations)), [vacations]);
+  // Same set the decay pass and the payout use, or the bar you're shown
+  // stops matching the bar you're judged against.
+  const away = useMemo(() => getForgivenSet(cheatDay, vacations), [cheatDay, vacations]);
   const active = useMemo(() => habits.filter((h) => !h.archived), [habits]);
   const threshold = useMemo(
     () => resolveBossThreshold(active, weekStart, bossWeek, away),
@@ -84,7 +87,7 @@ export function BossBattleCard() {
       </p>
       {reducedBy > 0 && (
         <p className="mt-0.5 text-right text-[11px] text-mana-400/70">
-          Target cut {reducedBy}% — you were away part of this week
+          Target cut {reducedBy}% — days off don't count against you
         </p>
       )}
     </div>

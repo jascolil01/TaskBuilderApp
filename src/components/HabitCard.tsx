@@ -26,11 +26,14 @@ export function HabitCard({
   // Offered only where it makes sense: a scheduled day, one day back, that the
   // quest existed for and has no completion yet.
   const yesterday = addDays(todayStr(), -1);
+  const yesterdayEntry = completions.find((c) => c.habitId === habit.id && c.date === yesterday);
   const canBackfill =
     !habit.archived &&
     isScheduledDay(habit, yesterday) &&
     yesterday >= habit.createdAt.slice(0, 10) &&
-    !completions.some((c) => c.habitId === habit.id && c.date === yesterday);
+    !yesterdayEntry;
+  // A backfill used to be permanent; it can be taken back the same way.
+  const undoBackfill = yesterdayEntry?.backfilled === true;
 
   const scheduleLabel =
     habit.frequency.type === 'daily'
@@ -92,6 +95,15 @@ export function HabitCard({
           className="mt-2 w-full rounded-lg border border-white/12 py-1.5 text-[11px] text-white/45 active:scale-[0.98]"
         >
           📜 I did this yesterday
+        </button>
+      )}
+
+      {undoBackfill && (
+        <button
+          onClick={() => undoCompleteHabit(habit.id, yesterday)}
+          className="mt-2 w-full rounded-lg border border-white/12 py-1.5 text-[11px] text-white/35 active:scale-[0.98]"
+        >
+          📜 Logged for yesterday · Undo
         </button>
       )}
     </div>

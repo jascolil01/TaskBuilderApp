@@ -11,11 +11,21 @@ import { isScheduledDay } from './rpg';
  * the four days it was never due.
  */
 
+/**
+ * How far back the completion rate looks.
+ *
+ * Measuring over a quest's whole life made the number useless: a quest created
+ * in January that you have kept perfectly for the last month still read 12%,
+ * and could never recover no matter what you did. A rolling window answers the
+ * question you can actually act on — how am I doing lately.
+ */
+export const RATE_WINDOW_DAYS = 30;
+
 export interface QuestStat {
   habitId: string;
   name: string;
   attribute: AttributeKey;
-  /** Scheduled occurrences since the quest was created, up to and including today. */
+  /** Scheduled occurrences inside the window, never before the quest existed. */
   due: number;
   completed: number;
   /** 0–100, or null when the quest has never yet been due. */
@@ -41,7 +51,9 @@ export function getQuestStats(
   habits: Habit[],
   completions: CompletionEntry[],
   today: string,
+  windowDays = RATE_WINDOW_DAYS,
 ): QuestStat[] {
+  const from = addDays(today, -(windowDays - 1));
   const byHabit = new Map<string, Set<string>>();
   for (const c of completions) {
     let set = byHabit.get(c.habitId);
@@ -55,13 +67,13 @@ export function getQuestStats(
   return habits
     .filter((h) => !h.archived)
     .map((h) => {
-      const due = countDue(h, h.createdAt.slice(0, 10), today);
+      const due = countDue(h, from, today);
       const dates = byHabit.get(h.id) ?? new Set<string>();
       // Only completions on days it was actually due count toward the rate;
       // extra credit shouldn't be able to push a quest past 100%.
       let completed = 0;
       for (const date of dates) {
-        if (date <= today && isScheduledDay(h, date)) completed += 1;
+        if (date >= from && date <= today && isScheduledDay(h, date)) completed += 1;
       }
       return {
         habitId: h.id,
