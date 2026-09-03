@@ -2,6 +2,14 @@ import { useStore } from '../store';
 import type { Habit } from '../types';
 import { ATTRIBUTE_INFO, isAtRisk, isDecaying, isScheduledDay } from '../lib/rpg';
 import { getEffortGold, inferEffort } from '../lib/effort';
+import {
+  daysToNextTier,
+  effectiveTier,
+  getStreakBonus,
+  getTierName,
+  nextTier,
+  tierForStreak,
+} from '../lib/streak';
 import { addDays, todayStr, weekdayLabel } from '../lib/date';
 
 export function HabitCard({
@@ -22,6 +30,17 @@ export function HabitCard({
   const attributes = useStore((s) => s.character.attributes);
   const decaying = isDecaying(habit, attributes);
   const atRisk = isAtRisk(habit, attributes);
+
+  // The reward side of consistency. A tier can outlive the streak that earned
+  // it — a break steps it down rather than clearing it — so this is read from
+  // the held tier, not from the streak alone.
+  const tier = effectiveTier(habit.bonusTier, habit.streak);
+  const tierPct = Math.round(getStreakBonus(tier) * 100);
+  const toNext = daysToNextTier(habit.bonusTier, habit.streak);
+  const upcoming = nextTier(tier);
+  // The rung is carried over from a run that has since broken, rather than
+  // earned by the streak showing right now.
+  const held = tier > tierForStreak(habit.streak);
 
   // Offered only where it makes sense: a scheduled day, one day back, that the
   // quest existed for and has no completion yet.
@@ -79,6 +98,18 @@ export function HabitCard({
             <span>{scheduleLabel}</span>
             {offSchedule && <span className="text-white/35">no streak credit</span>}
             {habit.streak > 0 && <span className="text-gold-400/90">🔥 {habit.streak} day streak</span>}
+            {tier > 0 && (
+              <span className="text-mana-300/90">
+                ⚡ {getTierName(tier)} +{tierPct}% XP
+                {/* Without this, a bonus sitting on a zeroed streak looks like a bug. */}
+                {held && <span className="text-white/35"> (held)</span>}
+              </span>
+            )}
+            {toNext !== null && upcoming && (
+              <span className="text-white/30">
+                {toNext}d to {upcoming.name}
+              </span>
+            )}
             {decaying && <span className="text-blood-400">⚠ decaying ({habit.missedSinceCompletion}d missed)</span>}
             {!decaying && atRisk && (
               <span className="text-gold-400/90">

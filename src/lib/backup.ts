@@ -15,6 +15,7 @@ import type {
 } from '../types';
 import { getEffortXp, inferEffort, isEffortTier } from './effort';
 import { ATTRIBUTE_KEYS, SIGNATURE_LEVEL } from './rpg';
+import { clampTier, tierForStreak } from './streak';
 import {
   COSMETIC_RINGS,
   COSMETIC_TITLES,
@@ -202,9 +203,21 @@ function parseHabit(raw: unknown): Habit | null {
     xpReward: getEffortXp(effort),
     streak: Math.max(0, Math.floor(finiteNum(raw.streak, 0))),
     bestStreak: Math.max(0, Math.floor(finiteNum(raw.bestStreak, 0))),
+    // A retained tier can legitimately sit above what the current streak has
+    // earned back, so this can only be range-checked, not derived. Backups
+    // that predate streak bonuses fall back to what the streak implies.
+    bonusTier:
+      raw.bonusTier === undefined
+        ? tierForStreak(Math.max(0, Math.floor(finiteNum(raw.streak, 0))))
+        : clampTier(finiteNum(raw.bonusTier, 0)),
     lastCompletedDate: nullableDate(raw.lastCompletedDate),
     decayedThroughDate: nullableDate(raw.decayedThroughDate),
     missedSinceCompletion: Math.max(0, Math.floor(finiteNum(raw.missedSinceCompletion, 0))),
+    // Dropped by earlier versions of this parser, which quietly cost an
+    // imported save its Phoenix Feather target.
+    ...(raw.lastBrokenStreak === undefined
+      ? {}
+      : { lastBrokenStreak: Math.max(0, Math.floor(finiteNum(raw.lastBrokenStreak, 0))) }),
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
     archived: raw.archived === true,
   };
@@ -236,6 +249,7 @@ function parseCompletion(raw: unknown): CompletionEntry | null {
       missedSinceCompletion: Math.max(0, Math.floor(finiteNum(prev.missedSinceCompletion, 0))),
       lastCompletedDate: nullableDate(prev.lastCompletedDate),
       decayedThroughDate: nullableDate(prev.decayedThroughDate),
+      ...(prev.bonusTier === undefined ? {} : { bonusTier: clampTier(finiteNum(prev.bonusTier, 0)) }),
     };
   }
   return entry;

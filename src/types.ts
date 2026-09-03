@@ -29,6 +29,14 @@ export interface Habit {
   xpReward: number;
   streak: number;
   bestStreak: number;
+  /**
+   * Streak-bonus tier held, as an index into STREAK_TIERS. Tracked separately
+   * from `streak` because a break steps this down by one rather than zeroing
+   * it — so it can legitimately sit above what the current streak has earned
+   * back. Absent on quests saved before streak bonuses existed; the migration
+   * seeds it from the streak.
+   */
+  bonusTier?: number;
   lastCompletedDate: string | null;
   decayedThroughDate: string | null;
   missedSinceCompletion: number;
@@ -50,6 +58,8 @@ export interface HabitProgressSnapshot {
   missedSinceCompletion: number;
   lastCompletedDate: string | null;
   decayedThroughDate: string | null;
+  /** Absent on entries written before streak bonuses existed. */
+  bonusTier?: number;
 }
 
 export interface CompletionEntry {

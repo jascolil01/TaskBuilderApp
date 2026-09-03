@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useStore } from '../store';
 import { ATTRIBUTE_INFO, ATTRIBUTE_KEYS } from '../lib/rpg';
 import { todayStr } from '../lib/date';
+import { effectiveTier, STREAK_TIERS } from '../lib/streak';
 import {
   formatWeekLabel,
   getAttributeTrend,
@@ -28,6 +29,12 @@ export function Stats({ onClose }: { onClose: () => void }) {
   const rated = weekdays.filter((d) => d.rate !== null);
   const best = rated.length ? rated.reduce((a, b) => (b.rate! > a.rate! ? b : a)) : null;
   const worst = rated.length ? rated.reduce((a, b) => (b.rate! < a.rate! ? b : a)) : null;
+  // The highest rung any quest currently holds, so the ladder shows how far
+  // along you actually are rather than reading as a static price list.
+  const bestTier = habits.reduce(
+    (max, h) => (h.archived ? max : Math.max(max, effectiveTier(h.bonusTier, h.streak))),
+    0,
+  );
   const peak = Math.max(1, ...trend.flatMap((p) => ATTRIBUTE_KEYS.map((k) => p.xp[k])));
   const anyTrend = trend.some((p) => ATTRIBUTE_KEYS.some((k) => p.xp[k] > 0));
 
@@ -72,6 +79,32 @@ export function Stats({ onClose }: { onClose: () => void }) {
             ))}
           </div>
         )}
+
+        <h3 className="mt-6 font-display text-sm uppercase tracking-widest text-white/50">Streak rewards</h3>
+        <p className="mt-1 text-[11px] text-white/40">
+          The longer a quest's streak, the more XP it pays. Miss a day and the bonus steps down one rung — it doesn't
+          reset. Gold is unaffected.
+        </p>
+        <div className="mt-2.5 flex flex-col gap-1.5">
+          {STREAK_TIERS.slice(1).map((t, i) => {
+            const reached = bestTier >= i + 1;
+            return (
+              <div
+                key={t.name}
+                className={`flex items-center justify-between rounded-lg border px-3 py-2 text-xs ${
+                  reached ? 'border-mana-500/40 bg-mana-500/10' : 'border-white/8 bg-ink-800/30'
+                }`}
+              >
+                <span className={reached ? 'text-mana-200' : 'text-white/40'}>
+                  {reached ? '⚡' : '·'} {t.name}
+                </span>
+                <span className={reached ? 'text-white/70' : 'text-white/30'}>
+                  {t.days} days · +{Math.round(t.bonus * 100)}% XP
+                </span>
+              </div>
+            );
+          })}
+        </div>
 
         <h3 className="mt-6 font-display text-sm uppercase tracking-widest text-white/50">By day of week</h3>
         {best && worst && best.day !== worst.day ? (

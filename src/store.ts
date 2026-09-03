@@ -60,6 +60,7 @@ import {
   validateVacation,
 } from './lib/vacation';
 import { type EffortTier, getEffortXp, inferEffort } from './lib/effort';
+import { clampTier, crossesTier, effectiveTier, getTierName, tierForStreak } from './lib/streak';
 import { getTemplate } from './lib/questCatalog';
 import { getForgivenDates, getForgivenSet } from './lib/forgiveness';
 import { getGear, isValidGearId, withEquipped, withoutEquipped } from './lib/gear';
@@ -75,7 +76,7 @@ function makeId(): string {
 const DEFAULT_STARTERS = ['con-water', 'wis-bed', 'int-read'];
 
 /** Persisted schema version. Backups are stamped with it, so they agree. */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 function starterRewards(): Reward[] {
   const now = new Date().toISOString();
@@ -257,6 +258,8 @@ export const useStore = create<Store>()(
               // Constitution earns the perk, but a rest day is a rest day —
               // it forgives every quest that was due, not just CON ones.
               forgivenDates,
+              // Momentum is Dexterity's own, so it shields only DEX quests.
+              keepBonusTier: h.attribute === 'DEX' && hasSignature(baseAttributes, 'momentum'),
             });
 
             if (xpLoss > 0) {
@@ -343,6 +346,7 @@ export const useStore = create<Store>()(
             xpReward: getEffortXp(template.effort),
             streak: 0,
             bestStreak: 0,
+            bonusTier: 0,
             lastCompletedDate: null,
             decayedThroughDate: null,
             missedSinceCompletion: 0,
@@ -368,6 +372,7 @@ export const useStore = create<Store>()(
               xpReward: getEffortXp(input.effort),
               streak: 0,
               bestStreak: 0,
+              bonusTier: 0,
               lastCompletedDate: null,
               decayedThroughDate: null,
               missedSinceCompletion: 0,
@@ -431,8 +436,18 @@ export const useStore = create<Store>()(
             missedSinceCompletion: habit.missedSinceCompletion,
             lastCompletedDate: habit.lastCompletedDate,
             decayedThroughDate: habit.decayedThroughDate,
+            bonusTier: clampTier(habit.bonusTier ?? 0),
           },
         };
+
+        // Reaching a new rung is rare — four times in a quest's life — so it
+        // gets its own toast rather than competing with the usual chain below.
+        if (onSchedule && crossesTier(habit.bonusTier, newStreak)) {
+          const pct = Math.round(award.streakBonus * 100);
+          useToastStore
+            .getState()
+            .show(`🔥 ${getTierName(award.streakTier)} — ${newStreak}-day streak. This quest now pays +${pct}% XP.`);
+        }
 
         const oldLevel = state.character.attributes[habit.attribute].level;
         const newAttrState = addXp(state.character.attributes[habit.attribute], award.xp);
@@ -491,6 +506,10 @@ export const useStore = create<Store>()(
                     ...h,
                     streak: newStreak,
                     bestStreak: Math.max(h.bestStreak, newStreak),
+                    // An off-schedule completion earns no streak credit, so it
+                    // can't advance the tier either — but it keeps the one
+                    // already held, which is what the award was paid at.
+                    bonusTier: onSchedule ? effectiveTier(h.bonusTier, newStreak) : clampTier(h.bonusTier ?? 0),
                     lastCompletedDate: today,
                     decayedThroughDate: today,
                     missedSinceCompletion: onSchedule ? 0 : h.missedSinceCompletion,
@@ -562,6 +581,7 @@ export const useStore = create<Store>()(
             missedSinceCompletion: habit.missedSinceCompletion,
             lastCompletedDate: habit.lastCompletedDate,
             decayedThroughDate: habit.decayedThroughDate,
+            bonusTier: clampTier(habit.bonusTier ?? 0),
           },
         };
 
@@ -614,6 +634,9 @@ export const useStore = create<Store>()(
                     ...h,
                     streak: plan.newStreak,
                     bestStreak: Math.max(h.bestStreak, plan.newStreak),
+                    // The miss decay charged for turns out not to have
+                    // happened, so the tier it stepped down goes back up.
+                    bonusTier: plan.newBonusTier,
                     // Today's completion, if there is one, still owns these.
                     lastCompletedDate: doneToday ? h.lastCompletedDate : yesterday,
                     decayedThroughDate: doneToday ? h.decayedThroughDate : yesterday,
@@ -677,6 +700,10 @@ export const useStore = create<Store>()(
               decayedThroughDate: addDays(today, -1),
               missedSinceCompletion: 0,
             };
+        // An entry from before streak bonuses has no tier to restore. Leaving
+        // the key present but undefined would spread over the live value and
+        // silently wipe the bonus, so drop it entirely.
+        if (restored.bonusTier === undefined) delete restored.bonusTier;
 
         set((s) => {
           // The attribute got the award plus any decay refund; lifetime XP got
@@ -877,6 +904,9 @@ export const useStore = create<Store>()(
                   ...h,
                   streak: restored,
                   bestStreak: Math.max(h.bestStreak, restored),
+                  // Putting the streak back puts back the standing it implies,
+                  // or the feather would hand you a run whose bonus had gone.
+                  bonusTier: effectiveTier(h.bonusTier, restored),
                   // A restored streak implies the gap is forgiven, so decay
                   // stops too — otherwise the streak would break again at once.
                   missedSinceCompletion: 0,
@@ -1157,14 +1187,20 @@ export const useStore = create<Store>()(
         // v6: quests carry an effort tier. Inferred from the hand-set XP the
         // old slider produced, which can nudge a value to the nearest tier
         // (a 15 XP quest becomes Short at 10 or Real at 20).
-        const withEffort = (Array.isArray(state.habits) ? state.habits : []).map((h) => {
-          if (h.effort) return h;
-          const effort = inferEffort(h.xpReward ?? 20);
-          return { ...h, effort, xpReward: getEffortXp(effort) };
+        //
+        // v7: quests carry a streak-bonus tier, seeded from the streak they
+        // already hold — someone forty days into a habit has plainly earned
+        // that rung and shouldn't start the ladder from the bottom.
+        const upgradedHabits = (Array.isArray(state.habits) ? state.habits : []).map((h) => {
+          const withTier =
+            h.bonusTier === undefined ? { ...h, bonusTier: tierForStreak(h.streak ?? 0) } : h;
+          if (withTier.effort) return withTier;
+          const effort = inferEffort(withTier.xpReward ?? 20);
+          return { ...withTier, effort, xpReward: getEffortXp(effort) };
         });
 
         if (fromVersion >= 4) {
-          return { ...state, character: withGear, habits: withEffort } as Store;
+          return { ...state, character: withGear, habits: upgradedHabits } as Store;
         }
 
         // v1 had no lifetimeXp and no cheat-day state. Seed lifetime XP from
@@ -1199,9 +1235,9 @@ export const useStore = create<Store>()(
               createdAt: legacy.createdAt,
             };
           }),
-          // v6: `...state` above carries the untouched habits, so the effort
+          // v6/v7: `...state` above carries the untouched habits, so the
           // mapping has to be reapplied here or the oldest saves would skip it.
-          habits: withEffort,
+          habits: upgradedHabits,
           bossWeek: null,
           // v4: vacations.
           vacations: Array.isArray(state.vacations) ? state.vacations : [],
