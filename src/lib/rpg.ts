@@ -1,6 +1,7 @@
 import type { AttributeKey, AttributeState, Attributes, Habit } from '../types';
 import { addDays, dayOfWeek } from './date';
 import { getEffortGold, inferEffort } from './effort';
+import { clampTier, effectiveTier, getStreakBonus, MAX_TIER_INDEX, tierForStreak } from './streak';
 
 export const ATTRIBUTE_KEYS: AttributeKey[] = ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA'];
 
@@ -139,6 +140,8 @@ export interface DecayOptions {
   perMiss: number;
   /** Days forgiven by a spent Cheat Day charge — skipped entirely. */
   forgivenDates?: readonly string[];
+  /** Dexterity's Momentum signature: the streak bonus tier survives a miss. */
+  keepBonusTier?: boolean;
 }
 
 /**
@@ -157,6 +160,7 @@ export function processHabitDecay(habit: Habit, today: string, options: DecayOpt
   let cursor = addDays(start, 1);
   let missed = habit.missedSinceCompletion;
   let streak = habit.streak;
+  let bonusTier = clampTier(habit.bonusTier ?? 0);
   let xpLoss = 0;
 
   let brokenStreak = habit.lastBrokenStreak;
@@ -169,6 +173,11 @@ export function processHabitDecay(habit: Habit, today: string, options: DecayOpt
         if (streak > 0) brokenStreak = streak;
         streak = 0;
       }
+      // The bonus tier erodes a step at a time rather than collapsing, so a
+      // single bad day after three months costs you one rung, not the ladder.
+      // Note this happens from the *first* miss, before grace: grace protects
+      // you from losing XP, while the bonus is a reward for an unbroken run.
+      if (!options.keepBonusTier) bonusTier = Math.max(0, bonusTier - 1);
       if (missed > options.graceDays) {
         xpLoss += options.perMiss;
       }
@@ -181,6 +190,7 @@ export function processHabitDecay(habit: Habit, today: string, options: DecayOpt
       ...habit,
       missedSinceCompletion: missed,
       streak,
+      bonusTier,
       lastBrokenStreak: brokenStreak,
       decayedThroughDate: addDays(today, -1),
     },
@@ -225,8 +235,6 @@ export const GOLD_PERK_BONUS = 0.25;
 /** Signature perk tuning, kept together so the numbers are easy to find and adjust. */
 export const BERSERKER_INTERVAL = 7;
 export const BERSERKER_MULTIPLIER = 2;
-export const MOMENTUM_PER_STREAK_DAY = 0.02;
-export const MOMENTUM_CAP = 0.5;
 export const DEEP_WORK_SPILL = 0.1;
 export const EQUANIMITY_DECAY_REDUCTION = 0.25;
 export const PATRON_GOLD_BONUS = 0.25;
@@ -252,7 +260,8 @@ export const PERKS: Record<AttributeKey, Perk[]> = {
       level: SIGNATURE_LEVEL,
       name: 'Momentum',
       signature: 'momentum',
-      description: 'Dexterity quests pay +2% XP per day of streak, up to +50%.',
+      description:
+        'Dexterity quests never lose a streak-bonus tier. A missed day still breaks the streak, but the bonus it earned holds.',
     },
     { level: 10, name: 'Practiced Precision', description: '+10% XP from Dexterity quests.' },
     { level: 15, name: 'Shadow Step', description: '+1 more day of grace before Dexterity quests decay.' },
@@ -362,6 +371,9 @@ export interface CompletionAward {
   doubled: boolean;
   /** True when an Elixir of Might charge was consumed for this completion. */
   elixirUsed: boolean;
+  /** Streak-bonus tier this completion was paid at, and what it added. */
+  streakTier: number;
+  streakBonus: number;
 }
 
 /**
@@ -389,9 +401,11 @@ export function getCompletionAward(
     doubled = true;
   }
 
-  if (habit.attribute === 'DEX' && hasSignature(attributes, 'momentum')) {
-    xpMultiplier *= 1 + Math.min(MOMENTUM_CAP, Math.max(0, newStreak) * MOMENTUM_PER_STREAK_DAY);
-  }
+  // The consistency bonus. Deliberately XP-only — see lib/streak.ts for why
+  // gold stays out of it.
+  const streakTier = effectiveTier(habit.bonusTier, newStreak);
+  const streakBonus = getStreakBonus(streakTier);
+  xpMultiplier *= 1 + streakBonus;
 
   const xpBeforeElixir = Math.max(1, Math.round(habit.xpReward * xpMultiplier));
 
@@ -414,7 +428,16 @@ export function getCompletionAward(
       ? Math.floor(xp * DEEP_WORK_SPILL)
       : 0;
 
-  return { xp, baseXp: habit.xpReward, gold, spilloverXp, doubled, elixirUsed: elixirActive };
+  return {
+    xp,
+    baseXp: habit.xpReward,
+    gold,
+    spilloverXp,
+    doubled,
+    elixirUsed: elixirActive,
+    streakTier,
+    streakBonus,
+  };
 }
 
 /**
@@ -490,6 +513,8 @@ export interface BackfillPlan {
   reason?: string;
   /** The streak the habit should end up with, including today if it's done. */
   newStreak: number;
+  /** The streak-bonus tier the habit should end up with. */
+  newBonusTier: number;
   /** XP to hand back for a decay charge that no longer applies. */
   xpRefund: number;
   /** False when the day wasn't a scheduled one — rewards, but no streak credit. */
@@ -513,7 +538,8 @@ export interface BackfillOptions {
  * caller can restore it wholesale instead of patching the cached fields.
  */
 export function planBackfill(habit: Habit, date: string, options: BackfillOptions): BackfillPlan {
-  const empty = { newStreak: habit.streak, xpRefund: 0, wasScheduled: false };
+  const held = clampTier(habit.bonusTier ?? 0);
+  const empty = { newStreak: habit.streak, newBonusTier: held, xpRefund: 0, wasScheduled: false };
   if (habit.archived) return { ok: false, reason: 'This quest is archived.', ...empty };
   if (date < habit.createdAt.slice(0, 10)) {
     return { ok: false, reason: "This quest didn't exist yet.", ...empty };
@@ -533,13 +559,19 @@ export function planBackfill(habit: Habit, date: string, options: BackfillOption
 
   // Only refund if decay actually got as far as this day and charged for it.
   const processed = habit.decayedThroughDate !== null && habit.decayedThroughDate >= date;
+  const countedAsMiss = processed && wasScheduled && !forgiven.has(date);
   const charged =
-    processed &&
-    wasScheduled &&
-    !forgiven.has(date) &&
-    missesEndingAt(habit, options.completedDates, date, forgiven) > options.graceDays;
+    countedAsMiss && missesEndingAt(habit, options.completedDates, date, forgiven) > options.graceDays;
 
-  return { ok: true, newStreak, xpRefund: charged ? options.perMiss : 0, wasScheduled };
+  // If decay stepped the bonus tier down for this day, logging it puts that
+  // step back — the miss it was charged for turns out never to have happened.
+  // The grace period doesn't gate this, because the step-down didn't either.
+  const newBonusTier = Math.max(
+    Math.min(MAX_TIER_INDEX, held + (countedAsMiss ? 1 : 0)),
+    tierForStreak(newStreak),
+  );
+
+  return { ok: true, newStreak, newBonusTier, xpRefund: charged ? options.perMiss : 0, wasScheduled };
 }
 
 export function isDecaying(habit: Habit, attributes?: Attributes): boolean {
