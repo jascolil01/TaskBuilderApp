@@ -10,7 +10,7 @@ import {
   type RewardTier,
   SHOP_ITEMS,
 } from '../lib/shop';
-import { getCharacterClass } from '../lib/rpg';
+import { getClassStanding } from '../lib/classes';
 import { getGearForClass, SLOT_LABELS, type GearItem } from '../lib/gear';
 import { COOLDOWN_LABEL, getClassRewards, getCooldown, type CooldownState } from '../lib/rewards';
 import { todayStr } from '../lib/date';
@@ -45,15 +45,16 @@ export function Shop() {
   // Only your own class's gear is listed. Everything else would be clutter you
   // couldn't buy anyway, and it stays waiting if your class ever changes back.
   const preferredClass = useStore((s) => s.character.preferredClass);
-  const { attribute: classAttribute, className } = useMemo(
-    () => getCharacterClass(attributes, preferredClass),
+  const { id: classId, def: classDef } = useMemo(
+    () => getClassStanding(attributes, preferredClass),
     [attributes, preferredClass],
   );
-  const classGear = useMemo(() => getGearForClass(classAttribute), [classAttribute]);
+  const className = classDef.name;
+  const classGear = useMemo(() => getGearForClass(classId), [classId]);
 
   const redemptions = useStore((s) => s.redemptions);
   const today = todayStr();
-  const classRewards = useMemo(() => getClassRewards(classAttribute), [classAttribute]);
+  const classRewards = useMemo(() => getClassRewards(classId), [classId]);
   const cooldownFor = (id: string, tier: Parameters<typeof getRewardCost>[0], name: string) =>
     getCooldown(id, tier, redemptions, today, name);
 
@@ -251,7 +252,7 @@ export function Shop() {
         <div className="flex flex-col gap-3">
           <p className="text-[11px] text-white/35">
             Gear for your {className}. It changes how your character looks and nothing else. Other classes' gear
-            is hidden — if your highest attribute changes, that class's gear appears here instead, and anything
+            is hidden — if the class you present as changes, that class's gear appears here instead, and anything
             you've bought is waiting for you when you come back.
           </p>
 

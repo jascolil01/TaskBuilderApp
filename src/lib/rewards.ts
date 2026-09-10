@@ -1,4 +1,4 @@
-import type { AttributeKey } from '../types';
+import { CLASS_IDS, type ClassId } from './classes';
 import { addDays, parseDate } from './date';
 import type { RewardTier } from './shop';
 import { REWARD_TIERS, REWARD_TIER_ORDER } from './shop';
@@ -32,43 +32,121 @@ export const COOLDOWN_LABEL: Record<RewardTier, string> = {
   legendary: 'once a season',
 };
 
-/** Curated rewards, one per tier per class. Ids are stable and synthetic. */
-export const CLASS_REWARDS: Record<AttributeKey, Record<RewardTier, string>> = {
-  STR: {
-    minor: 'A long hot shower and an early night',
-    standard: 'New training gear',
-    major: 'A massage or a sports therapy session',
-    legendary: 'A weekend away somewhere physical — hills, water, rock',
+/**
+ * Curated rewards, one per tier per class. Ids are stable and synthetic.
+ *
+ * `idKey` marks the six sets that predate the twelve classes: their ids were
+ * minted from an attribute (`class-str-major`), and the redemption log refers
+ * to those ids to work out cooldowns. Changing them would hand back every
+ * resting reward at once, so the old keys stay.
+ */
+interface ClassRewardSet {
+  idKey?: string;
+  tiers: Record<RewardTier, string>;
+}
+
+export const CLASS_REWARDS: Record<ClassId, ClassRewardSet> = {
+  barbarian: {
+    idKey: 'str',
+    tiers: {
+      minor: 'A long hot shower and an early night',
+      standard: 'New training gear',
+      major: 'A massage or a sports therapy session',
+      legendary: 'A weekend away somewhere physical — hills, water, rock',
+    },
   },
-  DEX: {
-    minor: 'An hour on a game, no guilt',
-    standard: 'A night out with people you like',
-    major: "That piece of kit you've been circling for months",
-    legendary: "A trip somewhere you've never been",
+  ranger: {
+    idKey: 'dex',
+    tiers: {
+      minor: 'An hour on a game, no guilt',
+      standard: 'A night out with people you like',
+      major: "That piece of kit you've been circling for months",
+      legendary: "A trip somewhere you've never been",
+    },
   },
-  CON: {
-    minor: 'A proper lie-in, alarm off',
-    standard: 'A really good meal, someone else cooking',
-    major: 'A full day off with every plan cancelled',
-    legendary: 'A few days entirely off, somewhere else',
+  fighter: {
+    idKey: 'con',
+    tiers: {
+      minor: 'A proper lie-in, alarm off',
+      standard: 'A really good meal, someone else cooking',
+      major: 'A full day off with every plan cancelled',
+      legendary: 'A few days entirely off, somewhere else',
+    },
   },
-  INT: {
-    minor: 'A new book, bought on impulse',
-    standard: "The course you've had bookmarked for a year",
-    major: 'A conference, or the equipment you keep talking yourself out of',
-    legendary: 'A week off to build the thing you never have time for',
+  wizard: {
+    idKey: 'int',
+    tiers: {
+      minor: 'A new book, bought on impulse',
+      standard: "The course you've had bookmarked for a year",
+      major: 'A conference, or the equipment you keep talking yourself out of',
+      legendary: 'A week off to build the thing you never have time for',
+    },
   },
-  WIS: {
-    minor: 'An hour of nothing at all',
-    standard: 'A whole day with your phone off',
-    major: 'A weekend retreat',
-    legendary: 'A week somewhere quiet, on your own terms',
+  cleric: {
+    idKey: 'wis',
+    tiers: {
+      minor: 'An hour of nothing at all',
+      standard: 'A whole day with your phone off',
+      major: 'A weekend retreat',
+      legendary: 'A week somewhere quiet, on your own terms',
+    },
   },
-  CHA: {
-    minor: 'Call the person you keep meaning to call',
-    standard: 'Dinner with people you love',
-    major: 'Throw the thing — the party, the dinner, the gig',
-    legendary: 'A trip to see someone who lives too far away',
+  bard: {
+    idKey: 'cha',
+    tiers: {
+      minor: 'Call the person you keep meaning to call',
+      standard: 'Dinner with people you love',
+      major: 'Throw the thing — the party, the dinner, the gig',
+      legendary: 'A trip to see someone who lives too far away',
+    },
+  },
+  rogue: {
+    tiers: {
+      minor: 'The good coffee, the expensive one, on a weekday',
+      standard: 'An evening that nobody else gets told about',
+      major: 'The thing you want and cannot justify. Buy it anyway',
+      legendary: 'A city break booked late, told to no one until you land',
+    },
+  },
+  monk: {
+    tiers: {
+      minor: 'Twenty minutes on the floor with the lights off',
+      standard: 'A long walk with no destination and no podcast',
+      major: 'A day of it — sauna, swim, silence, no schedule',
+      legendary: 'A week where the only plan is the practice',
+    },
+  },
+  paladin: {
+    tiers: {
+      minor: 'Say yes to the small favour you would normally dodge',
+      standard: 'A meal you cook for someone else, properly',
+      major: 'Give the day to something that is not for you',
+      legendary: 'The trip you promised someone years ago. Book it',
+    },
+  },
+  druid: {
+    tiers: {
+      minor: 'An hour outside, whatever the weather is doing',
+      standard: 'Something living for the house — a plant, a tree, a start',
+      major: 'A day somewhere with no road noise',
+      legendary: 'A week under canvas, or close enough to it',
+    },
+  },
+  sorcerer: {
+    tiers: {
+      minor: 'Whatever you feel like, right now, no deliberating',
+      standard: 'Say yes to the invitation you would normally decline',
+      major: 'The extravagant one. No justification required',
+      legendary: 'Go somewhere on a whim and work it out when you arrive',
+    },
+  },
+  warlock: {
+    tiers: {
+      minor: 'An hour down whichever rabbit hole is calling',
+      standard: 'The strange book, the obscure film, the odd museum',
+      major: 'The equipment or lessons for the thing nobody understands',
+      legendary: 'Travel for the obsession — the archive, the site, the source',
+    },
   },
 };
 
@@ -76,21 +154,32 @@ export interface ClassReward {
   id: string;
   name: string;
   tier: RewardTier;
-  attribute: AttributeKey;
+  classId: ClassId;
   cost: number;
 }
 
-export function getClassRewards(attribute: AttributeKey): ClassReward[] {
+function rewardIdKey(classId: ClassId): string {
+  return CLASS_REWARDS[classId].idKey ?? classId;
+}
+
+/** idKey → class, so a stored id resolves back however it was minted. */
+const CLASS_BY_REWARD_KEY = new Map<string, ClassId>(
+  CLASS_IDS.map((id) => [rewardIdKey(id), id]),
+);
+
+export function getClassRewards(classId: ClassId): ClassReward[] {
   return REWARD_TIER_ORDER.map((tier) => ({
-    id: `class-${attribute.toLowerCase()}-${tier}`,
-    name: CLASS_REWARDS[attribute][tier],
+    id: `class-${rewardIdKey(classId)}-${tier}`,
+    name: CLASS_REWARDS[classId].tiers[tier],
     tier,
-    attribute,
+    classId,
     cost: REWARD_TIERS[tier].cost,
   }));
 }
 
-const CLASS_REWARD_ID = /^class-(str|dex|con|int|wis|cha)-(minor|standard|major|legendary)$/;
+const CLASS_REWARD_ID = new RegExp(
+  `^class-(${[...CLASS_BY_REWARD_KEY.keys()].join('|')})-(minor|standard|major|legendary)$`,
+);
 
 export function isClassRewardId(id: string): boolean {
   return CLASS_REWARD_ID.test(id);
@@ -100,13 +189,14 @@ export function isClassRewardId(id: string): boolean {
 export function getClassReward(id: string): ClassReward | null {
   const match = CLASS_REWARD_ID.exec(id);
   if (!match) return null;
-  const attribute = match[1].toUpperCase() as AttributeKey;
+  const classId = CLASS_BY_REWARD_KEY.get(match[1]);
+  if (!classId) return null;
   const tier = match[2] as RewardTier;
   return {
     id,
-    name: CLASS_REWARDS[attribute][tier],
+    name: CLASS_REWARDS[classId].tiers[tier],
     tier,
-    attribute,
+    classId,
     cost: REWARD_TIERS[tier].cost,
   };
 }

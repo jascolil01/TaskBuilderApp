@@ -16,6 +16,7 @@ import type {
 import { getEffortXp, inferEffort, isEffortTier } from './effort';
 import { ATTRIBUTE_KEYS, SIGNATURE_LEVEL } from './rpg';
 import { clampTier, tierForStreak } from './streak';
+import { isClassId } from './classes';
 import {
   COSMETIC_RINGS,
   COSMETIC_TITLES,
@@ -159,11 +160,9 @@ function parseCharacter(raw: unknown, completions: unknown): CharacterState | nu
     cheatDay: parseCheatDay(raw.cheatDay, attributes.CON.level),
     inventory: parseInventory(raw.inventory),
     cosmetics: parseCosmetics(raw.cosmetics),
-    // Only a real attribute key survives; anything else is dropped and the
-    // class falls back to priority order, which is always safe.
-    preferredClass: ATTRIBUTE_KEYS.includes(raw.preferredClass as AttributeKey)
-      ? (raw.preferredClass as AttributeKey)
-      : null,
+    // Only a real class id survives; anything else is dropped and the class
+    // falls back to the best fit for the attributes, which is always safe.
+    preferredClass: isClassId(raw.preferredClass) ? raw.preferredClass : null,
     lastDecayCheck: typeof raw.lastDecayCheck === 'string' ? raw.lastDecayCheck : todayStr(),
   };
 }

@@ -4,12 +4,11 @@ import type { AttributeKey } from '../types';
 import {
   ATTRIBUTE_INFO,
   ATTRIBUTE_KEYS,
-  CLASS_BY_ATTRIBUTE,
-  getCharacterClass,
   getCharacterProgress,
   getTier,
   xpToNextLevel,
 } from '../lib/rpg';
+import { getClassDef, getClassStanding } from '../lib/classes';
 import { getNextPerk, getUnlockedPerks, isAtRisk, isDecaying } from '../lib/rpg';
 import { XpBar } from '../components/XpBar';
 import { Avatar } from '../components/Avatar';
@@ -38,10 +37,15 @@ export function CharacterSheet() {
 
   const progress = useMemo(() => getCharacterProgress(character.lifetimeXp), [character.lifetimeXp]);
   const level = progress.level;
-  const { attribute: dominantAttribute, className, tied } = useMemo(
-    () => getCharacterClass(character.attributes, character.preferredClass),
+  const standing = useMemo(
+    () => getClassStanding(character.attributes, character.preferredClass),
     [character.attributes, character.preferredClass],
   );
+  const { def: classDef, selectable } = standing;
+  const className = classDef.name;
+  // The class's own primary ability drives the accent colour, so a Paladin
+  // reads as Strength rather than as whatever happened to be highest.
+  const dominantAttribute = classDef.primary[0];
   const tier = useMemo(() => getTier(level), [level]);
   const equippedTitle = useMemo(
     () => COSMETIC_TITLES.find((t) => t.id === character.cosmetics.activeTitle)?.label ?? null,
@@ -117,26 +121,30 @@ export function CharacterSheet() {
         <p className="mt-1 text-sm text-gold-400/80">
           Level {level} {className}
         </p>
-        {tied.length > 1 && (
+        <p className="mt-1 text-[11px] text-white/40">{classDef.tagline}</p>
+        {selectable.length > 1 && (
           <div className="mt-2">
             <p className="text-[10px] uppercase tracking-widest text-white/30">
-              {tied.length} attributes tied — choose your class
+              {selectable.length} classes open to you
             </p>
             <div className="mt-1.5 flex flex-wrap justify-center gap-1.5">
-              {tied.map((key) => (
-                <button
-                  key={key}
-                  onClick={() => setPreferredClass(key)}
-                  className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                    key === dominantAttribute
-                      ? 'text-ink-950'
-                      : 'border border-white/15 text-white/55'
-                  }`}
-                  style={key === dominantAttribute ? { background: ATTRIBUTE_INFO[key].color } : undefined}
-                >
-                  {CLASS_BY_ATTRIBUTE[key]}
-                </button>
-              ))}
+              {selectable.map((id) => {
+                const def = getClassDef(id);
+                const active = id === standing.id;
+                return (
+                  <button
+                    key={id}
+                    onClick={() => setPreferredClass(active ? null : id)}
+                    title={`${def.tagline} · d${def.hitDie}`}
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                      active ? 'text-ink-950' : 'border border-white/15 text-white/55'
+                    }`}
+                    style={active ? { background: ATTRIBUTE_INFO[def.primary[0]].color } : undefined}
+                  >
+                    {def.name}
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
@@ -163,7 +171,7 @@ export function CharacterSheet() {
       </div>
 
       <Suspense fallback={<div className="h-40 w-full rounded-xl border border-white/10 bg-ink-950/50" />}>
-        <WalkingCharacter3D attribute={dominantAttribute} equipped={character.cosmetics.equippedGear} />
+        <WalkingCharacter3D classId={standing.id} equipped={character.cosmetics.equippedGear} />
       </Suspense>
 
       <VacationCard />

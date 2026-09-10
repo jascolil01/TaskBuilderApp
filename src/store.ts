@@ -26,7 +26,6 @@ import {
   getCompletionAward,
   getCrossedPerks,
   getDecayPerMiss,
-  getCharacterClass,
   getEffectiveGraceDays,
   hasSignature,
   isDecaying,
@@ -61,9 +60,17 @@ import {
 } from './lib/vacation';
 import { type EffortTier, getEffortXp, inferEffort } from './lib/effort';
 import { clampTier, crossesTier, effectiveTier, getTierName, tierForStreak } from './lib/streak';
+import { type ClassId, getClassesForAttribute, getClassStanding, isClassId } from './lib/classes';
 import { getTemplate } from './lib/questCatalog';
 import { getForgivenDates, getForgivenSet } from './lib/forgiveness';
-import { getGear, isValidGearId, withEquipped, withoutEquipped } from './lib/gear';
+import {
+  type CosmeticSlot,
+  getGear,
+  getGearFor,
+  isValidGearId,
+  withEquipped,
+  withoutEquipped,
+} from './lib/gear';
 import { canChangeTier, getClassReward, getCooldown } from './lib/rewards';
 import { parseBackup } from './lib/backup';
 import { useToastStore } from './toastStore';
@@ -76,7 +83,7 @@ function makeId(): string {
 const DEFAULT_STARTERS = ['con-water', 'wis-bed', 'int-read'];
 
 /** Persisted schema version. Backups are stamped with it, so they agree. */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 function starterRewards(): Reward[] {
   const now = new Date().toISOString();
@@ -102,7 +109,7 @@ interface Store {
   settings: ReminderSettings;
 
   setCharacterName: (name: string) => void;
-  setPreferredClass: (attribute: AttributeKey | null) => void;
+  setPreferredClass: (classId: ClassId | null) => void;
   startJourney: (name: string, templateIds: string[]) => void;
   spendCheatDay: () => void;
   setReminderSettings: (patch: Partial<Pick<ReminderSettings, 'enabled' | 'time'>>) => void;
@@ -167,7 +174,7 @@ function createInitialState() {
         unlockedGear: [] as string[],
         equippedGear: [] as string[],
       },
-      preferredClass: null as AttributeKey | null,
+      preferredClass: null as ClassId | null,
       lastDecayCheck: todayStr(),
     },
     // Quests are chosen during onboarding now, not handed out.
@@ -203,6 +210,54 @@ function advanceCheatDayRecharge(character: CharacterState): CharacterState {
   return { ...character, cheatDay: { ...cheatDay, charges: 1, progressToNext: 0 } };
 }
 
+/**
+ * The class each of the six original classes became. Four keep their name
+ * outright; Warrior and Guardian have no 5e equivalent, so they take the
+ * closest fit — and Guardian lands on Barbarian for the same reason a
+ * Constitution-led character does.
+ */
+const LEGACY_CLASS_BY_ATTRIBUTE: Record<AttributeKey, ClassId> = {
+  STR: 'fighter',
+  DEX: 'rogue',
+  CON: 'barbarian',
+  INT: 'wizard',
+  WIS: 'cleric',
+  CHA: 'bard',
+};
+
+function legacyPreferredClass(value: unknown): ClassId | null {
+  if (typeof value !== 'string') return null;
+  return LEGACY_CLASS_BY_ATTRIBUTE[value as AttributeKey] ?? null;
+}
+
+/**
+ * Carries the six attribute-keyed gear sets into twelve class-keyed ones.
+ *
+ * The old ids still resolve — those sets were rehoused, not rewritten — but
+ * they now belong to one specific class, and a Rogue who bought the Dexterity
+ * set would find it had become the Ranger's. Gear you paid for must never be
+ * stranded by a class change, so an old piece also grants the same slot in
+ * every other class built on that attribute. It is generous, but gear is pure
+ * vanity: there is no balance to protect, only a purchase to honour.
+ */
+function withInheritedGear(owned: string[]): string[] {
+  const out = new Set(owned);
+  for (const id of owned) {
+    const match = /^(str|dex|con|int|wis|cha)-(.+)$/.exec(id);
+    if (!match) continue;
+    const attribute = match[1].toUpperCase() as AttributeKey;
+    const slot = match[2] as CosmeticSlot;
+    for (const classId of getClassesForAttribute(attribute)) {
+      // Resolved through the catalog, not by building an id: six sets kept
+      // their old attribute-derived ids, so `barbarian-boots` is not a real id
+      // even though the Barbarian certainly has boots.
+      const inherited = getGearFor(classId, slot);
+      if (inherited) out.add(inherited.id);
+    }
+  }
+  return [...out];
+}
+
 export const useStore = create<Store>()(
   persist(
     (set, get) => ({
@@ -215,8 +270,8 @@ export const useStore = create<Store>()(
         set((state) => ({ character: { ...state.character, name: name.trim().slice(0, 24) } })),
 
       /**
-       * Only meaningful while attributes are tied for the lead; the getter
-       * ignores a stale preference, so nothing here needs to police it.
+       * Only meaningful while that class is still on offer; the getter ignores
+       * a stale preference, so nothing here needs to police it.
        */
       /**
        * Finishes onboarding. Naming the character is what unlocks the app, so
@@ -228,8 +283,8 @@ export const useStore = create<Store>()(
         get().setCharacterName(name || 'Adventurer');
       },
 
-      setPreferredClass: (attribute) =>
-        set((state) => ({ character: { ...state.character, preferredClass: attribute } })),
+      setPreferredClass: (classId) =>
+        set((state) => ({ character: { ...state.character, preferredClass: classId } })),
 
       setReminderSettings: (patch) => set((state) => ({ settings: { ...state.settings, ...patch } })),
 
@@ -798,8 +853,8 @@ export const useStore = create<Store>()(
         const name = custom ? custom.name : curated!.name;
         // A curated reward belongs to a class; you can only claim your own.
         if (curated) {
-          const { attribute } = getCharacterClass(state.character.attributes, state.character.preferredClass);
-          if (curated.attribute !== attribute) return;
+          const standing = getClassStanding(state.character.attributes, state.character.preferredClass);
+          if (curated.classId !== standing.id) return;
         }
 
         const cooldown = getCooldown(id, tier, state.redemptions, today, name);
@@ -970,8 +1025,8 @@ export const useStore = create<Store>()(
         if (!gear) return;
         // Gear is bought for the class you are now. Another class's pieces are
         // hidden from the shop, and this is the guard behind that.
-        if (getCharacterClass(state.character.attributes, state.character.preferredClass).attribute !== gear.attribute)
-          return;
+        const standing = getClassStanding(state.character.attributes, state.character.preferredClass);
+        if (gear.classId !== standing.id) return;
         if (state.character.cosmetics.unlockedGear.includes(id)) return;
         if (state.character.gold < gear.cost) return;
 
@@ -1167,6 +1222,9 @@ export const useStore = create<Store>()(
         // v4 ones that skip the migrations below — the renderer reads these
         // arrays unconditionally, so leaving them undefined would crash.
         const cosmetics = state.character.cosmetics as Partial<Cosmetics> | undefined;
+        const ownedGear = (Array.isArray(cosmetics?.unlockedGear) ? cosmetics.unlockedGear : []).filter(
+          isValidGearId,
+        );
         const withGear: Partial<CharacterState> = {
           ...state.character,
           cosmetics: {
@@ -1176,13 +1234,15 @@ export const useStore = create<Store>()(
             activeRing: cosmetics?.activeRing ?? null,
             // Unknown ids are dropped rather than trusted; a stale one would
             // otherwise sit in the loadout forever with nothing to render.
-            unlockedGear: (Array.isArray(cosmetics?.unlockedGear) ? cosmetics.unlockedGear : []).filter(
-              isValidGearId,
-            ),
+            unlockedGear: withInheritedGear(ownedGear),
             equippedGear: (Array.isArray(cosmetics?.equippedGear) ? cosmetics.equippedGear : []).filter(
               isValidGearId,
             ),
           },
+          // v8: the class you present as is one of twelve, not one of six.
+          preferredClass: isClassId(state.character.preferredClass)
+            ? state.character.preferredClass
+            : legacyPreferredClass(state.character.preferredClass),
         };
         // v6: quests carry an effort tier. Inferred from the hand-set XP the
         // old slider produced, which can nudge a value to the nearest tier

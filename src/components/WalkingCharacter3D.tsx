@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import type { AttributeKey } from '../types';
+import { type ClassId, getClassDef } from '../lib/classes';
 import { capeJoint, STRIDE, walkPose } from '../lib/walk';
 import { type CosmeticSlot, getEquippedBySlot } from '../lib/gear';
 
@@ -25,6 +26,12 @@ interface Palette {
   glow: number;
 }
 
+/**
+ * Palette still keys off an attribute rather than a class: colour carries the
+ * *meaning* here — Strength is blood red, Intelligence is mana blue — and two
+ * Charisma classes should read as the same kind of character. Silhouette is
+ * what separates a Bard from a Warlock, not hue.
+ */
 const PALETTES: Record<AttributeKey, Palette> = {
   STR: { garment: 0xb3372c, trim: 0xe8b45a, skin: 0xd9a279, leather: 0x6b4630, metal: 0x9fa8b4, dark: 0x2c2530, glow: 0xff8a5c },
   DEX: { garment: 0x4a9d5f, trim: 0xd6c48a, skin: 0xd9a279, leather: 0x6b4630, metal: 0x9fa8b4, dark: 0x24302a, glow: 0x4fd98a },
@@ -122,14 +129,26 @@ interface ArmHold {
  * walk. A sword hanging off a straight arm reads as luggage; brought up across
  * the body it reads as a warrior.
  */
-const KIT_HOLDS: Partial<Record<AttributeKey, { right?: ArmHold; left?: ArmHold }>> = {
-  STR: { right: { shoulderX: -0.38, shoulderZ: 0.34, elbowX: -1.3 } },
-  CON: { left: { shoulderX: -0.3, shoulderZ: -0.44, elbowX: -1.3 } },
-  WIS: { right: { shoulderX: -0.34, shoulderZ: 0.3, elbowX: -1.45 } },
-  // A staff and a bow are carried, not brandished — the arm stays low, but it
-  // still has to stop swinging, or the shaft scythes around like a metronome.
-  INT: { right: { shoulderX: -0.14, shoulderZ: 0.26, elbowX: -0.22 } },
-  DEX: { right: { shoulderX: -0.18, shoulderZ: 0.58, elbowX: -0.26 } },
+const BLADE_HOLD: ArmHold = { shoulderX: -0.38, shoulderZ: 0.34, elbowX: -1.3 };
+const SHIELD_HOLD: ArmHold = { shoulderX: -0.3, shoulderZ: -0.44, elbowX: -1.3 };
+const TOME_HOLD: ArmHold = { shoulderX: -0.34, shoulderZ: 0.3, elbowX: -1.45 };
+// A staff and a bow are carried, not brandished — the arm stays low, but it
+// still has to stop swinging, or the shaft scythes around like a metronome.
+const SHAFT_HOLD: ArmHold = { shoulderX: -0.14, shoulderZ: 0.26, elbowX: -0.22 };
+const BOW_HOLD: ArmHold = { shoulderX: -0.18, shoulderZ: 0.58, elbowX: -0.26 };
+
+const KIT_HOLDS: Partial<Record<ClassId, { right?: ArmHold; left?: ArmHold }>> = {
+  barbarian: { right: BLADE_HOLD },
+  fighter: { right: BLADE_HOLD, left: SHIELD_HOLD },
+  paladin: { right: BLADE_HOLD, left: SHIELD_HOLD },
+  rogue: { right: BLADE_HOLD, left: BLADE_HOLD },
+  cleric: { right: TOME_HOLD },
+  warlock: { right: TOME_HOLD },
+  wizard: { right: SHAFT_HOLD },
+  monk: { right: SHAFT_HOLD },
+  druid: { right: SHAFT_HOLD },
+  ranger: { right: BOW_HOLD },
+  sorcerer: { right: { shoulderX: -0.5, shoulderZ: 0.3, elbowX: -1.1 } },
 };
 
 /**
@@ -284,8 +303,8 @@ function luteMesh(m: Materials, bowlMat: THREE.Material, neckMat: THREE.Material
 // Class defaults
 // ---------------------------------------------------------------------------
 
-const DEFAULTS: Record<AttributeKey, Partial<Record<CosmeticSlot, SlotBuilder>>> = {
-  STR: {
+const DEFAULTS: Record<ClassId, Partial<Record<CosmeticSlot, SlotBuilder>>> = {
+  barbarian: {
     head: ({ m, head }) => {
       head.add(box(0.52, 0.15, 0.5, m.metal, 0, 0.45, 0));
       head.add(box(0.08, 0.19, 0.48, m.trim, 0, 0.57, 0));
@@ -300,7 +319,7 @@ const DEFAULTS: Record<AttributeKey, Partial<Record<CosmeticSlot, SlotBuilder>>>
     },
     weapon: ({ m, grips }) => grips.right.add(swordMesh(m, m.metal, m.trim, 0.14, 0.72)),
   },
-  DEX: {
+  ranger: {
     head: ({ m, head }) => head.add(hood(m.garment)),
     shoulders: ({ m, torso }) => {
       const quiver = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.095, 0.44, 8), m.leather);
@@ -316,7 +335,7 @@ const DEFAULTS: Record<AttributeKey, Partial<Record<CosmeticSlot, SlotBuilder>>>
     },
     weapon: ({ m, grips }) => grips.right.add(bowMesh(m, m.leather, 0.52)),
   },
-  CON: {
+  fighter: {
     head: ({ m, head }) => {
       head.add(box(0.52, 0.16, 0.52, m.metal, 0, 0.4, 0));
       head.add(box(0.08, 0.2, 0.44, m.trim, 0, 0.54, 0));
@@ -324,7 +343,7 @@ const DEFAULTS: Record<AttributeKey, Partial<Record<CosmeticSlot, SlotBuilder>>>
     shoulders: ({ m, torso }) => torso.add(box(0.64, 0.1, 0.4, m.metal, 0, 0.5, 0)),
     weapon: ({ m, grips }) => grips.left.add(shieldMesh(m, m.metal, 0.36)),
   },
-  INT: {
+  wizard: {
     head: ({ m, head }) => {
       const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.44, 0.05, 14), m.garment);
       brim.position.y = 0.4;
@@ -344,7 +363,7 @@ const DEFAULTS: Record<AttributeKey, Partial<Record<CosmeticSlot, SlotBuilder>>>
       });
     },
   },
-  WIS: {
+  cleric: {
     head: ({ m, head, onTick }) => {
       const halo = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.038, 8, 26), m.glow);
       halo.position.y = 0.68;
@@ -360,7 +379,7 @@ const DEFAULTS: Record<AttributeKey, Partial<Record<CosmeticSlot, SlotBuilder>>>
     shoulders: ({ m, torso }) => torso.add(box(0.5, 0.07, 0.36, m.trim, 0, 0.34, 0)),
     weapon: ({ m, grips }) => grips.right.add(tomeMesh(m, m.leather, m.glow)),
   },
-  CHA: {
+  bard: {
     head: ({ m, head }) => {
       const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.3, 0.16, 10), m.garment);
       cap.position.y = 0.42;
@@ -370,6 +389,145 @@ const DEFAULTS: Record<AttributeKey, Partial<Record<CosmeticSlot, SlotBuilder>>>
       head.add(feather);
     },
     weapon: (ctx) => ctx.torso.add(luteMesh(ctx.m, ctx.m.leather, ctx.m.leather, ctx)),
+  },
+
+  // The six classes added with the 2024 roster. Each is built from the same
+  // primitives as the originals, so a new silhouette costs geometry and not
+  // another mesh helper.
+  rogue: {
+    head: ({ m, head }) => {
+      head.add(hood(m.garment, 0.33, 0.38));
+      // A mask across the lower face, just proud of it so it reads at size.
+      head.add(box(0.4, 0.14, 0.04, m.dark, 0, 0.16, 0.235));
+    },
+    shoulders: ({ m, torso }) => {
+      const strap = box(0.5, 0.07, 0.3, m.leather, 0, 0.44, 0.04);
+      strap.rotation.z = 0.38;
+      torso.add(strap);
+      for (let i = -1; i <= 1; i++) {
+        torso.add(box(0.04, 0.14, 0.04, m.metal, i * 0.11 - 0.02, 0.5 + i * 0.07, 0.2));
+      }
+    },
+    weapon: ({ m, grips }) => {
+      grips.right.add(swordMesh(m, m.metal, m.dark, 0.1, 0.3));
+      grips.left.add(swordMesh(m, m.metal, m.dark, 0.1, 0.3));
+    },
+  },
+  monk: {
+    head: ({ m, head }) => {
+      const band = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.028, 6, 18), m.metal);
+      band.position.set(0, 0.38, 0);
+      band.rotation.x = Math.PI / 2;
+      head.add(band);
+    },
+    shoulders: ({ m, torso }) => {
+      for (const x of [-0.32, 0.32]) {
+        const wrap = box(0.16, 0.2, 0.28, m.trim, x, 0.6, 0);
+        wrap.rotation.z = x > 0 ? -0.2 : 0.2;
+        torso.add(wrap);
+      }
+    },
+    weapon: ({ m, grips }) => {
+      const plain = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), m.leather);
+      grips.right.add(staffMesh(m.leather, plain, 1.5));
+    },
+  },
+  paladin: {
+    head: ({ m, head }) => {
+      head.add(box(0.52, 0.16, 0.52, m.metal, 0, 0.42, 0));
+      // A short crown of points rather than a single crest.
+      for (const x of [-0.16, 0, 0.16]) head.add(box(0.05, 0.13, 0.05, m.trim, x, 0.56, 0));
+      head.add(box(0.44, 0.05, 0.04, m.trim, 0, 0.3, 0.24));
+    },
+    shoulders: ({ m, torso }) => {
+      const pauldron = (x: number) => {
+        const p = box(0.28, 0.2, 0.3, m.metal, x, 0.63, 0);
+        p.rotation.z = x > 0 ? -0.22 : 0.22;
+        return p;
+      };
+      torso.add(pauldron(-0.37), pauldron(0.37));
+      torso.add(box(0.1, 0.1, 0.06, m.glow, 0.37, 0.72, 0.1));
+    },
+    weapon: ({ m, grips }) => {
+      grips.right.add(swordMesh(m, m.metal, m.glow, 0.12, 0.66));
+      grips.left.add(shieldMesh(m, m.metal, 0.34));
+    },
+  },
+  druid: {
+    head: ({ m, head }) => {
+      // Antlers: two forked prongs rather than a modelled rack.
+      for (const side of [-1, 1]) {
+        const main = box(0.04, 0.3, 0.04, m.leather, side * 0.17, 0.55, -0.02);
+        main.rotation.z = side * 0.34;
+        head.add(main);
+        const fork = box(0.035, 0.16, 0.035, m.leather, side * 0.29, 0.68, -0.02);
+        fork.rotation.z = side * 0.9;
+        head.add(fork);
+      }
+    },
+    shoulders: ({ m, torso }) => {
+      for (const x of [-0.3, 0.3]) torso.add(box(0.22, 0.12, 0.3, m.trim, x, 0.6, 0));
+      torso.add(box(0.16, 0.08, 0.2, m.trim, 0, 0.66, 0.06));
+    },
+    weapon: ({ m, grips, onTick }) => {
+      const leaf = new THREE.Mesh(new THREE.IcosahedronGeometry(0.1), m.glow);
+      grips.right.add(staffMesh(m.leather, leaf, 1.42));
+      onTick((t) => {
+        leaf.rotation.z = Math.sin(t * 1.1) * 0.3;
+      });
+    },
+  },
+  sorcerer: {
+    head: ({ m, head, onTick }) => {
+      const diadem = new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.022, 6, 20), m.glow);
+      diadem.position.y = 0.4;
+      diadem.rotation.x = Math.PI / 2;
+      head.add(diadem);
+      onTick((t) => {
+        m.glow.emissiveIntensity = 0.4 + Math.sin(t * 3.4) * 0.28;
+      });
+    },
+    shoulders: ({ m, torso }) => {
+      for (const x of [-0.34, 0.34]) {
+        for (let i = 0; i < 3; i++) {
+          const scale = box(0.2 - i * 0.03, 0.05, 0.24, m.metal, x, 0.66 - i * 0.06, 0);
+          scale.rotation.z = x > 0 ? -0.3 : 0.3;
+          torso.add(scale);
+        }
+      }
+    },
+    // No weapon: raw magic held in an open hand.
+    weapon: ({ m, grips, onTick }) => {
+      const orb = new THREE.Mesh(new THREE.IcosahedronGeometry(0.13, 1), m.glow);
+      orb.position.set(0, 0.16, 0.06);
+      grips.right.add(orb);
+      onTick((t) => {
+        orb.rotation.set(t * 0.9, t * 1.3, 0);
+        orb.scale.setScalar(1 + Math.sin(t * 4) * 0.09);
+      });
+    },
+  },
+  warlock: {
+    head: ({ m, head }) => {
+      head.add(hood(m.garment, 0.37, 0.44));
+      head.add(box(0.09, 0.09, 0.04, m.glow, 0.2, 0.34, 0.16));
+    },
+    shoulders: ({ m, torso }) => {
+      // A clawed shape resting on one shoulder only — deliberately asymmetric.
+      for (let i = 0; i < 3; i++) {
+        const claw = box(0.045, 0.19, 0.045, m.dark, -0.3 + i * 0.09, 0.62, 0.02);
+        claw.rotation.z = 0.3 - i * 0.3;
+        torso.add(claw);
+      }
+      torso.add(box(0.26, 0.09, 0.26, m.dark, -0.3, 0.68, 0));
+    },
+    weapon: ({ m, grips, onTick }) => {
+      const tome = tomeMesh(m, m.dark, m.glow);
+      grips.right.add(tome);
+      onTick((t) => {
+        m.glow.emissiveIntensity = 0.3 + Math.sin(t * 1.7) * 0.22;
+      });
+    },
   },
 };
 
@@ -699,23 +857,39 @@ const GEAR_BUILDERS: Record<string, SlotBuilder> = {
 };
 
 /** Robes are the class's body shape, not a cosmetic — gear never replaces them. */
-const CLASS_BODY: Partial<Record<AttributeKey, (m: Materials, torso: THREE.Group) => void>> = {
-  INT: (m, torso) => {
-    const robe = new THREE.Mesh(new THREE.CylinderGeometry(0.31, 0.46, 0.46, 10), m.garment);
-    robe.position.y = 0.1;
-    robe.castShadow = true;
-    torso.add(robe);
+function robe(m: Materials, torso: THREE.Group, top: number, bottom: number, height: number, y: number) {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(top, bottom, height, 10), m.garment);
+  mesh.position.y = y;
+  mesh.castShadow = true;
+  torso.add(mesh);
+}
+
+const CLASS_BODY: Partial<Record<ClassId, (m: Materials, torso: THREE.Group) => void>> = {
+  wizard: (m, torso) => robe(m, torso, 0.31, 0.46, 0.46, 0.1),
+  cleric: (m, torso) => robe(m, torso, 0.3, 0.46, 0.5, 0.08),
+  druid: (m, torso) => robe(m, torso, 0.32, 0.44, 0.44, 0.1),
+  sorcerer: (m, torso) => robe(m, torso, 0.29, 0.44, 0.48, 0.09),
+  warlock: (m, torso) => robe(m, torso, 0.3, 0.42, 0.52, 0.06),
+  monk: (m, torso) => {
+    // A sash rather than a robe: the Monk's silhouette is the bare frame.
+    const sash = box(0.12, 0.42, 0.14, m.trim, 0.24, 0.12, 0.04);
+    sash.rotation.z = 0.22;
+    torso.add(sash);
   },
-  WIS: (m, torso) => {
-    const robe = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.46, 0.5, 10), m.garment);
-    robe.position.y = 0.08;
-    robe.castShadow = true;
-    torso.add(robe);
+  barbarian: (m, torso) => {
+    // Bare arms and a heavier chest: the d12 made visible.
+    torso.add(box(0.66, 0.24, 0.4, m.leather, 0, 0.5, 0));
+  },
+  paladin: (m, torso) => {
+    // A tabard hanging past the belt, front and back.
+    torso.add(box(0.3, 0.5, 0.02, m.trim, 0, 0.06, 0.19));
+    torso.add(box(0.3, 0.5, 0.02, m.trim, 0, 0.06, -0.19));
   },
 };
 
-function buildCharacter(attribute: AttributeKey, equipped: string[]) {
-  const m = buildMaterials(PALETTES[attribute]);
+function buildCharacter(classId: ClassId, equipped: string[]) {
+  // Colour comes from the class's primary ability, silhouette from the class.
+  const m = buildMaterials(PALETTES[getClassDef(classId).primary[0]]);
   const root = new THREE.Group();
   /** Everything below the root, so the walk bob never fights the patrol path. */
   const body = new THREE.Group();
@@ -730,7 +904,7 @@ function buildCharacter(attribute: AttributeKey, equipped: string[]) {
   torso.add(box(0.62, 0.09, 0.38, m.leather, 0, 0.06, 0));
   torso.add(box(0.14, 0.11, 0.42, m.trim, 0, 0.06, 0));
   body.add(torso);
-  CLASS_BODY[attribute]?.(m, torso);
+  CLASS_BODY[classId]?.(m, torso);
 
   const arms = { left: buildArm(m, -1), right: buildArm(m, 1) };
   torso.add(arms.left.shoulder, arms.right.shoulder);
@@ -741,7 +915,7 @@ function buildCharacter(attribute: AttributeKey, equipped: string[]) {
 
   // Lock any carrying arm into its ready pose BEFORE the grips are measured,
   // so each grip cancels the pose its own arm actually ended up in.
-  const holds = KIT_HOLDS[attribute] ?? {};
+  const holds = KIT_HOLDS[classId] ?? {};
   const held = { left: !!holds.left, right: !!holds.right };
   for (const side of ['left', 'right'] as const) {
     const hold = holds[side];
@@ -785,16 +959,18 @@ function buildCharacter(attribute: AttributeKey, equipped: string[]) {
 
   // A purchased piece replaces the class default for its slot; anything with
   // no default and nothing equipped (auras) simply isn't built.
-  const bySlot = getEquippedBySlot(equipped, attribute);
+  const bySlot = getEquippedBySlot(equipped, classId);
   const SLOT_FALLBACKS: Partial<Record<CosmeticSlot, SlotBuilder>> = {
     cloak: defaultCloak,
     boots: defaultBoots,
   };
   for (const slot of ['head', 'shoulders', 'weapon', 'cloak', 'boots', 'aura'] as CosmeticSlot[]) {
     const equippedId = bySlot[slot];
-    const builder = equippedId
-      ? GEAR_BUILDERS[equippedId]
-      : (DEFAULTS[attribute][slot] ?? SLOT_FALLBACKS[slot]);
+    const classDefault = DEFAULTS[classId][slot] ?? SLOT_FALLBACKS[slot];
+    // A piece with no bespoke geometry yet falls back to the class silhouette
+    // rather than rendering an empty slot — the twelve new sets are owned,
+    // named and equippable before every one of them is modelled.
+    const builder = equippedId ? (GEAR_BUILDERS[equippedId] ?? classDefault) : classDefault;
     builder?.(ctx);
   }
 
@@ -824,10 +1000,10 @@ function buildAura(color: number) {
 }
 
 export function WalkingCharacter3D({
-  attribute,
+  classId,
   equipped = [],
 }: {
-  attribute: AttributeKey;
+  classId: ClassId;
   equipped?: string[];
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -886,10 +1062,10 @@ export function WalkingCharacter3D({
     ground.receiveShadow = true;
     scene.add(ground);
 
-    const rig = buildCharacter(attribute, loadout ? loadout.split(',') : []);
+    const rig = buildCharacter(classId, loadout ? loadout.split(',') : []);
     scene.add(rig.root);
 
-    const aura = buildAura(PALETTES[attribute].garment);
+    const aura = buildAura(PALETTES[getClassDef(classId).primary[0]].garment);
     if (aura) scene.add(aura);
 
     const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
@@ -1007,7 +1183,7 @@ export function WalkingCharacter3D({
       renderer.dispose();
       if (renderer.domElement.parentNode === container) container.removeChild(renderer.domElement);
     };
-  }, [attribute, loadout]);
+  }, [classId, loadout]);
 
   return (
     <div className="overflow-hidden rounded-xl border border-white/10 bg-ink-950/50">

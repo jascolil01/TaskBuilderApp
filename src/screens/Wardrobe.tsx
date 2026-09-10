@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useStore } from '../store';
-import { getCharacterClass, CLASS_BY_ATTRIBUTE } from '../lib/rpg';
+import { getClassDef, getClassStanding } from '../lib/classes';
 import {
   COSMETIC_SLOTS,
   getEquippedBySlot,
@@ -21,15 +21,16 @@ export function Wardrobe({ onClose }: { onClose: () => void }) {
   const preferredClass = useStore((s) => s.character.preferredClass);
   const setGearEquipped = useStore((s) => s.setGearEquipped);
 
-  const { attribute, className } = useMemo(
-    () => getCharacterClass(attributes, preferredClass),
+  const { id: classId, def: classDef } = useMemo(
+    () => getClassStanding(attributes, preferredClass),
     [attributes, preferredClass],
   );
+  const className = classDef.name;
   const equipped = useMemo(
-    () => getEquippedBySlot(cosmetics.equippedGear, attribute),
-    [cosmetics.equippedGear, attribute],
+    () => getEquippedBySlot(cosmetics.equippedGear, classId),
+    [cosmetics.equippedGear, classId],
   );
-  const catalog = useMemo(() => getGearForClass(attribute), [attribute]);
+  const catalog = useMemo(() => getGearForClass(classId), [classId]);
 
   // Pieces bought for a class you aren't presenting as right now. They're not
   // lost, and saying so is the whole point of showing them.
@@ -37,8 +38,8 @@ export function Wardrobe({ onClose }: { onClose: () => void }) {
     () =>
       cosmetics.unlockedGear
         .map(getGear)
-        .filter((g): g is NonNullable<typeof g> => Boolean(g) && g!.attribute !== attribute),
-    [cosmetics.unlockedGear, attribute],
+        .filter((g): g is NonNullable<typeof g> => Boolean(g) && g!.classId !== classId),
+    [cosmetics.unlockedGear, classId],
   );
 
   const ownedCount = catalog.filter((g) => cosmetics.unlockedGear.includes(g.id)).length;
@@ -100,12 +101,12 @@ export function Wardrobe({ onClose }: { onClose: () => void }) {
           <div className="mt-5 rounded-xl border border-white/10 bg-ink-800/30 p-4">
             <h3 className="font-display text-sm text-white/60">Stored for another class</h3>
             <p className="mt-1 text-[11px] text-white/35">
-              Yours for good. It comes back the moment that attribute leads again.
+              Yours for good. It comes back the moment you present as that class again.
             </p>
             <ul className="mt-2 flex flex-col gap-1">
               {elsewhere.map((g) => (
                 <li key={g.id} className="text-[11px] text-white/45">
-                  {CLASS_BY_ATTRIBUTE[g.attribute]} · {g.name}
+                  {getClassDef(g.classId).name} · {g.name}
                 </li>
               ))}
             </ul>

@@ -1,3 +1,4 @@
+import type { ClassId } from './lib/classes';
 import type { EffortTier } from './lib/effort';
 import type { RewardTier } from './lib/shop';
 
@@ -142,11 +143,11 @@ export interface CharacterState {
   inventory: Inventory;
   cosmetics: Cosmetics;
   /**
-   * Which class to present as while attributes are tied for the lead.
-   * Ignored the moment that attribute stops being tied, so it can never pin
-   * you to a class you've genuinely outgrown.
+   * Which of the twelve classes to present as. Honoured only while that class
+   * is still on offer for your current attributes, so it can never pin you to
+   * a class you've genuinely outgrown.
    */
-  preferredClass?: AttributeKey | null;
+  preferredClass?: ClassId | null;
   lastDecayCheck: string;
 }
 

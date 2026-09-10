@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { useStore } from '../store';
-import { getCharacterClass, getCharacterProgress } from '../lib/rpg';
+import { getCharacterProgress } from '../lib/rpg';
+import { getClassStanding } from '../lib/classes';
 import { getEquippedBySlot, getGear } from '../lib/gear';
 import { ShareCardSvg } from '../components/ShareCardSvg';
 
@@ -15,13 +16,15 @@ export function ShareCard({ onClose }: { onClose: () => void }) {
   const [message, setMessage] = useState<string | null>(null);
 
   const level = getCharacterProgress(character.lifetimeXp).level;
-  const { attribute: dominantAttribute, className } = getCharacterClass(
+  const { id: classId, def: classDef } = getClassStanding(
     character.attributes,
     character.preferredClass,
   );
+  const className = classDef.name;
+  const dominantAttribute = classDef.primary[0];
   // Only the gear for the class you're presenting as — that's what the card
   // shows a picture of.
-  const loadout = Object.values(getEquippedBySlot(character.cosmetics.equippedGear, dominantAttribute))
+  const loadout = Object.values(getEquippedBySlot(character.cosmetics.equippedGear, classId))
     .map((id) => getGear(id)?.name)
     .filter((n): n is string => Boolean(n));
 

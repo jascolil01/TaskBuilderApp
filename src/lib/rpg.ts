@@ -14,15 +14,6 @@ export const ATTRIBUTE_INFO: Record<AttributeKey, { label: string; description: 
   CHA: { label: 'Charisma', description: 'Social habits, connection, creativity', color: '#e07bb0' },
 };
 
-export const CLASS_BY_ATTRIBUTE: Record<AttributeKey, string> = {
-  STR: 'Warrior',
-  DEX: 'Rogue',
-  CON: 'Guardian',
-  INT: 'Wizard',
-  WIS: 'Cleric',
-  CHA: 'Bard',
-};
-
 const BASE_XP = 100;
 const XP_GROWTH = 40;
 /** A missed day past grace costs this share of what the quest pays. */
@@ -92,35 +83,6 @@ export function getCharacterProgress(lifetimeXp: number): CharacterProgress {
     level += 1;
   }
   return { level, xpIntoLevel: remaining, xpForNext: xpForCharacterLevel(level) };
-}
-
-const CLASS_PRIORITY: AttributeKey[] = ['STR', 'INT', 'DEX', 'WIS', 'CHA', 'CON'];
-
-/**
- * Every attribute currently level-tied for the lead. More than one means the
- * player gets to choose which of them they present as, rather than having a
- * fixed priority order pick for them.
- */
-export function getTiedAttributes(attributes: Attributes): AttributeKey[] {
-  const best = Math.max(...ATTRIBUTE_KEYS.map((k) => attributes[k].level));
-  return CLASS_PRIORITY.filter((k) => attributes[k].level === best);
-}
-
-/**
- * The class the character presents as.
- *
- * `preferred` is only honoured while that attribute is still tied for the
- * lead: a choice made during a tie must not keep a player looking like a
- * Warrior once their Intelligence has genuinely overtaken it. Once the tie
- * breaks on its own, the choice quietly stops applying.
- */
-export function getCharacterClass(
-  attributes: Attributes,
-  preferred?: AttributeKey | null,
-): { attribute: AttributeKey; className: string; tied: AttributeKey[] } {
-  const tied = getTiedAttributes(attributes);
-  const best = preferred && tied.includes(preferred) ? preferred : tied[0];
-  return { attribute: best, className: CLASS_BY_ATTRIBUTE[best], tied };
 }
 
 export function isScheduledDay(habit: Habit, dateStr: string): boolean {
