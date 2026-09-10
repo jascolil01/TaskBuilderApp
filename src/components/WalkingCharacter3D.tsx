@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import type { AttributeKey } from '../types';
-import { type ClassId, getClassDef } from '../lib/classes';
+import type { ClassId } from '../lib/classes';
 import { capeJoint, STRIDE, walkPose } from '../lib/walk';
 import { type CosmeticSlot, getEquippedBySlot } from '../lib/gear';
 
@@ -27,10 +27,14 @@ interface Palette {
 }
 
 /**
- * Palette still keys off an attribute rather than a class: colour carries the
- * *meaning* here — Strength is blood red, Intelligence is mana blue — and two
- * Charisma classes should read as the same kind of character. Silhouette is
- * what separates a Bard from a Warlock, not hue.
+ * One palette per class, not per attribute.
+ *
+ * Deriving colour from the primary ability was the obvious first move and it
+ * was wrong: Bard, Sorcerer and Warlock all lead on Charisma, so all three came
+ * out the same shade of pink, and a Warlock in pink is not a Warlock. The six
+ * original palettes are kept exactly as they were and inherited by the class
+ * that took over each gear set, so nobody's character changed colour; the six
+ * new classes get their own.
  */
 const PALETTES: Record<AttributeKey, Palette> = {
   STR: { garment: 0xb3372c, trim: 0xe8b45a, skin: 0xd9a279, leather: 0x6b4630, metal: 0x9fa8b4, dark: 0x2c2530, glow: 0xff8a5c },
@@ -39,6 +43,29 @@ const PALETTES: Record<AttributeKey, Palette> = {
   INT: { garment: 0x3f8fd6, trim: 0xa9d6ff, skin: 0xd9a279, leather: 0x5a4a6b, metal: 0x9fa8b4, dark: 0x1f2a3d, glow: 0x4fb8ff },
   WIS: { garment: 0x9b7fd4, trim: 0xe6dcff, skin: 0xd9a279, leather: 0x584a72, metal: 0xc9c2dd, dark: 0x2a2440, glow: 0xb89aff },
   CHA: { garment: 0xe07bb0, trim: 0xffd9ec, skin: 0xd9a279, leather: 0x7a4b5e, metal: 0xd9b06a, dark: 0x3a2233, glow: 0xff7ec0 },
+};
+
+const CLASS_PALETTES: Record<ClassId, Palette> = {
+  // Inherited, so an existing character's colours are untouched.
+  barbarian: PALETTES.STR,
+  ranger: PALETTES.DEX,
+  fighter: PALETTES.CON,
+  wizard: PALETTES.INT,
+  cleric: PALETTES.WIS,
+  bard: PALETTES.CHA,
+
+  // Dark slate and cold steel: the Rogue reads as absence of colour.
+  rogue: { garment: 0x2f3540, trim: 0x6d7684, skin: 0xd9a279, leather: 0x3d3229, metal: 0xb9c2cf, dark: 0x14171d, glow: 0x7fe3c0 },
+  // Bone and saffron, undyed and worn.
+  monk: { garment: 0xd8cdb6, trim: 0xd08a3c, skin: 0xd9a279, leather: 0x8a7657, metal: 0xc7bda6, dark: 0x40382c, glow: 0xffd9a0 },
+  // Silver plate over a deep blue tabard, gold at the edges.
+  paladin: { garment: 0x2f4a86, trim: 0xe8c14a, skin: 0xd9a279, leather: 0x4a4438, metal: 0xd6dde8, dark: 0x1a2440, glow: 0xfff0b8 },
+  // Forest and bark, nothing bright.
+  druid: { garment: 0x3f6b3a, trim: 0x8f6b3c, skin: 0xd9a279, leather: 0x5c4326, metal: 0x9aa08c, dark: 0x22301f, glow: 0x9ee06a },
+  // Crimson running to ember: innate magic, barely held.
+  sorcerer: { garment: 0x8e2438, trim: 0xff9a4a, skin: 0xd9a279, leather: 0x63303a, metal: 0xd9a05a, dark: 0x35131d, glow: 0xff6a2a },
+  // Deep violet and a glow that is the wrong colour for a fire.
+  warlock: { garment: 0x3d2358, trim: 0x7a54a8, skin: 0xd9a279, leather: 0x3a2c44, metal: 0x8f86a8, dark: 0x140c1f, glow: 0x66ffa8 },
 };
 
 /** One material per palette slot, shared across every mesh that uses it. */
@@ -854,6 +881,400 @@ const GEAR_BUILDERS: Record<string, SlotBuilder> = {
       });
     });
   },
+
+  // --- Rogue
+  'rogue-head': ({ m, head }) => {
+    head.add(hood(m.dark, 0.36, 0.4));
+    // The mask proper: a plate over nose and mouth, breathing slits cut in.
+    head.add(box(0.42, 0.18, 0.05, m.metal, 0, 0.15, 0.235));
+    for (const x of [-0.1, 0, 0.1]) head.add(box(0.02, 0.09, 0.02, m.dark, x, 0.15, 0.26));
+  },
+  'rogue-shoulders': ({ m, torso }) => {
+    const strap = box(0.54, 0.09, 0.32, m.leather, 0, 0.44, 0.05);
+    strap.rotation.z = 0.4;
+    torso.add(strap);
+    // Six blades along the bandolier rather than the default's three.
+    for (let i = 0; i < 6; i++) {
+      const blade = box(0.035, 0.16, 0.035, m.metal, -0.2 + i * 0.085, 0.36 + i * 0.075, 0.21);
+      blade.rotation.z = 0.4;
+      torso.add(blade);
+    }
+  },
+  'rogue-weapon': ({ m, grips }) => {
+    for (const grip of [grips.right, grips.left]) {
+      grip.add(swordMesh(m, m.metal, m.gold, 0.12, 0.36));
+    }
+  },
+  'rogue-cloak': (ctx) => cloakPanels(ctx, [0.5, 0.44, 0.34], [ctx.m.dark, ctx.m.garment], 0.2),
+  'rogue-boots': ({ m, knees }) => {
+    for (const knee of [knees.left, knees.right]) {
+      knee.add(box(0.22, 0.2, 0.3, m.dark, 0, -0.37, 0.02));
+      knee.add(box(0.2, 0.05, 0.28, m.leather, 0, -0.28, 0.01));
+    }
+  },
+  'rogue-aura': ({ auraRoot, m, onTick }) => {
+    // A coin walking the knuckles: one mark, orbiting close and flipping.
+    const mat = glowMat(m.palette.glow, 0.9);
+    const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.02, 14), mat);
+    auraRoot.add(coin);
+    onTick((t) => {
+      const a = t * 2.2;
+      coin.position.set(Math.cos(a) * 0.42, 0.95 + Math.sin(a * 2) * 0.1, Math.sin(a) * 0.42);
+      coin.rotation.set(Math.PI / 2, 0, t * 5);
+      mat.opacity = 0.35 + Math.abs(Math.sin(a)) * 0.55;
+    });
+  },
+
+  // --- Monk
+  'monk-head': ({ m, head, onTick }) => {
+    const band = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.035, 8, 20), m.gold);
+    band.position.set(0, 0.39, 0);
+    band.rotation.x = Math.PI / 2;
+    head.add(band);
+    const bead = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), m.glow);
+    bead.position.set(0, 0.42, 0.24);
+    head.add(bead);
+    onTick((t) => {
+      m.glow.emissiveIntensity = 0.35 + Math.sin(t * 1.8) * 0.2;
+    });
+  },
+  'monk-shoulders': ({ m, torso }) => {
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 3; i++) {
+        const wrap = box(0.2 - i * 0.02, 0.07, 0.3, m.trim, side * 0.33, 0.68 - i * 0.08, 0);
+        wrap.rotation.z = side * -0.18;
+        torso.add(wrap);
+      }
+    }
+  },
+  'monk-weapon': ({ m, grips, onTick }) => {
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), m.glow);
+    const staff = staffMesh(m.gold, cap, 1.6);
+    grips.right.add(staff);
+    onTick((t) => {
+      cap.scale.setScalar(1 + Math.sin(t * 3) * 0.12);
+    });
+  },
+  'monk-cloak': (ctx) => cloakPanels(ctx, [0.24, 0.2, 0.16, 0.12], [ctx.m.trim, ctx.m.garment], 0.3),
+  'monk-boots': ({ m, knees }) => {
+    // Unshod: wraps up the ankle and nothing on the foot.
+    for (const knee of [knees.left, knees.right]) {
+      for (let i = 0; i < 3; i++) {
+        knee.add(box(0.19, 0.05, 0.21, m.trim, 0, -0.2 - i * 0.07, 0));
+      }
+    }
+  },
+  'monk-aura': ({ auraRoot, m, onTick }) => {
+    // Rings spreading from the feet, as though the ground were water.
+    const rings = [0, 1, 2].map((i) => {
+      const mat = glowMat(m.palette.glow, 0.5);
+      const mesh = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.02, 6, 28), mat);
+      mesh.rotation.x = Math.PI / 2;
+      auraRoot.add(mesh);
+      return { mesh, mat, offset: i / 3 };
+    });
+    onTick((t) => {
+      rings.forEach(({ mesh, mat, offset }) => {
+        const life = (t * 0.5 + offset) % 1;
+        mesh.scale.setScalar(0.3 + life * 2.4);
+        mesh.position.y = 0.02;
+        mat.opacity = Math.max(0, 0.55 * (1 - life));
+      });
+    });
+  },
+
+  // --- Paladin
+  'paladin-head': ({ m, head }) => {
+    head.add(box(0.54, 0.2, 0.54, m.metal, 0, 0.43, 0));
+    head.add(box(0.46, 0.06, 0.05, m.gold, 0, 0.31, 0.25));
+    for (const x of [-0.19, -0.095, 0, 0.095, 0.19]) {
+      head.add(box(0.05, 0.15, 0.05, m.gold, x, 0.58, 0));
+    }
+  },
+  'paladin-shoulders': ({ m, torso, onTick }) => {
+    for (const side of [-1, 1]) {
+      const p = box(0.32, 0.24, 0.34, m.metal, side * 0.39, 0.64, 0);
+      p.rotation.z = side * -0.22;
+      torso.add(p);
+      torso.add(box(0.28, 0.05, 0.3, m.gold, side * 0.4, 0.76, 0));
+    }
+    const relic = new THREE.Mesh(new THREE.OctahedronGeometry(0.08), m.glow);
+    relic.position.set(0.4, 0.84, 0.06);
+    torso.add(relic);
+    onTick((t) => {
+      relic.rotation.y = t * 1.2;
+      m.glow.emissiveIntensity = 0.45 + Math.sin(t * 2.2) * 0.2;
+    });
+  },
+  'paladin-weapon': ({ m, grips }) => {
+    grips.right.add(swordMesh(m, m.gold, m.glow, 0.15, 0.8));
+    grips.left.add(shieldMesh(m, m.gold, 0.4));
+  },
+  'paladin-cloak': (ctx) =>
+    cloakPanels(ctx, [0.66, 0.62, 0.54, 0.44], [ctx.m.garment, ctx.m.gold], 0.28),
+  'paladin-boots': ({ m, knees }) => {
+    for (const knee of [knees.left, knees.right]) {
+      knee.add(box(0.27, 0.2, 0.34, m.metal, 0, -0.37, 0.03));
+      knee.add(box(0.25, 0.06, 0.26, m.gold, 0, -0.25, 0));
+      knee.add(box(0.1, 0.06, 0.08, m.gold, 0, -0.31, 0.17));
+    }
+  },
+  'paladin-aura': ({ auraRoot, m, onTick }) => {
+    // A ring of light holding the ground, with standing motes inside it.
+    const mat = glowMat(m.palette.glow, 0.5);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.035, 8, 36), mat);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.03;
+    auraRoot.add(ring);
+    const pillars = [0, 1, 2, 3].map((i) => {
+      const pm = glowMat(m.palette.glow, 0.35);
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.5, 0.05), pm);
+      const a = (i / 4) * Math.PI * 2;
+      mesh.position.set(Math.cos(a) * 0.62, 0.25, Math.sin(a) * 0.62);
+      auraRoot.add(mesh);
+      return { mesh, pm, i };
+    });
+    onTick((t) => {
+      mat.opacity = 0.35 + Math.sin(t * 1.6) * 0.18;
+      pillars.forEach(({ mesh, pm, i }) => {
+        mesh.scale.y = 0.7 + Math.sin(t * 2 + i) * 0.3;
+        pm.opacity = 0.2 + Math.abs(Math.sin(t * 1.4 + i * 0.7)) * 0.3;
+      });
+    });
+  },
+
+  // --- Druid
+  'druid-head': ({ m, head }) => {
+    // A full rack rather than the default's two prongs.
+    for (const side of [-1, 1]) {
+      const main = box(0.05, 0.36, 0.05, m.leather, side * 0.18, 0.58, -0.02);
+      main.rotation.z = side * 0.3;
+      head.add(main);
+      for (let i = 0; i < 3; i++) {
+        const fork = box(0.035, 0.17, 0.035, m.leather, side * (0.26 + i * 0.05), 0.6 + i * 0.11, -0.02);
+        fork.rotation.z = side * (0.8 + i * 0.15);
+        head.add(fork);
+      }
+    }
+    head.add(box(0.46, 0.07, 0.44, m.trim, 0, 0.42, 0));
+  },
+  'druid-shoulders': ({ m, torso, onTick }) => {
+    const leaves: THREE.Mesh[] = [];
+    for (const side of [-1, 1]) {
+      torso.add(box(0.26, 0.14, 0.32, m.trim, side * 0.32, 0.62, 0));
+      for (let i = 0; i < 3; i++) {
+        const leaf = new THREE.Mesh(new THREE.IcosahedronGeometry(0.06), m.garment);
+        leaf.position.set(side * (0.28 + i * 0.06), 0.74 + i * 0.05, -0.06 + i * 0.07);
+        torso.add(leaf);
+        leaves.push(leaf);
+      }
+    }
+    onTick((t) => {
+      leaves.forEach((leaf, i) => {
+        leaf.rotation.set(Math.sin(t * 0.9 + i) * 0.3, t * 0.4 + i, 0);
+      });
+    });
+  },
+  'druid-weapon': ({ m, grips, onTick }) => {
+    const bloom = new THREE.Mesh(new THREE.IcosahedronGeometry(0.13, 1), m.glow);
+    grips.right.add(staffMesh(m.leather, bloom, 1.55));
+    onTick((t) => {
+      bloom.rotation.set(t * 0.5, t * 0.8, 0);
+      bloom.scale.setScalar(1 + Math.sin(t * 1.6) * 0.12);
+    });
+  },
+  'druid-cloak': (ctx) =>
+    cloakPanels(ctx, [0.6, 0.56, 0.48, 0.38], [ctx.m.garment, ctx.m.trim, ctx.m.leather], 0.26),
+  'druid-boots': ({ m, knees }) => {
+    for (const knee of [knees.left, knees.right]) {
+      knee.add(box(0.24, 0.22, 0.3, m.leather, 0, -0.36, 0.02));
+      // Roots reaching down past the ankle.
+      for (const x of [-0.07, 0, 0.07]) {
+        knee.add(box(0.03, 0.12, 0.03, m.trim, x, -0.5, 0.04));
+      }
+    }
+  },
+  'druid-aura': ({ auraRoot, m, onTick }) => {
+    // Three birds wheeling, never quite landing.
+    const birds = [0, 1, 2].map((i) => {
+      const mat = glowMat(m.palette.glow, 0.8);
+      const body = new THREE.Group();
+      const core = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.04, 0.11), mat);
+      const wingL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.02, 0.06), mat);
+      const wingR = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.02, 0.06), mat);
+      wingL.position.x = -0.11;
+      wingR.position.x = 0.11;
+      body.add(core, wingL, wingR);
+      auraRoot.add(body);
+      return { body, wingL, wingR, mat, phase: (i / 3) * Math.PI * 2 };
+    });
+    onTick((t) => {
+      birds.forEach(({ body, wingL, wingR, mat, phase }) => {
+        const a = t * 0.9 + phase;
+        body.position.set(Math.cos(a) * 0.75, 1.15 + Math.sin(a * 1.7) * 0.22, Math.sin(a) * 0.75);
+        body.rotation.y = -a;
+        const flap = Math.sin(t * 9 + phase) * 0.6;
+        wingL.rotation.z = flap;
+        wingR.rotation.z = -flap;
+        mat.opacity = 0.7;
+      });
+    });
+  },
+
+  // --- Sorcerer
+  'sorcerer-head': ({ m, head, onTick }) => {
+    const diadem = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.035, 8, 24), m.gold);
+    diadem.position.y = 0.47;
+    diadem.rotation.x = Math.PI / 2;
+    head.add(diadem);
+    const shards = [-1, 0, 1].map((i) => {
+      const shard = new THREE.Mesh(new THREE.OctahedronGeometry(0.055), m.glow);
+      shard.position.set(i * 0.14, 0.6 + Math.abs(i) * -0.05, 0.12);
+      head.add(shard);
+      return shard;
+    });
+    onTick((t) => {
+      shards.forEach((sh, i) => {
+        sh.rotation.set(t * (1 + i * 0.3), t * 1.4, 0);
+      });
+      m.glow.emissiveIntensity = 0.45 + Math.sin(t * 4) * 0.3;
+    });
+  },
+  'sorcerer-shoulders': ({ m, torso }) => {
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 4; i++) {
+        const scale = box(0.24 - i * 0.035, 0.055, 0.28, m.metal, side * 0.36, 0.72 - i * 0.06, 0);
+        scale.rotation.z = side * -0.28;
+        torso.add(scale);
+      }
+    }
+  },
+  'sorcerer-weapon': ({ m, grips, onTick }) => {
+    // No weapon at all: raw magic, held. Three shells around an open palm.
+    const shells = [0.1, 0.15, 0.2].map((r, i) => {
+      const mat = glowMat(m.palette.glow, 0.55 - i * 0.13);
+      const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(r, i === 0 ? 1 : 0), mat);
+      mesh.position.set(0, 0.18, 0.08);
+      grips.right.add(mesh);
+      return { mesh, i };
+    });
+    onTick((t) => {
+      shells.forEach(({ mesh, i }) => {
+        mesh.rotation.set(t * (0.8 + i * 0.5), t * (1.1 - i * 0.3), 0);
+        mesh.scale.setScalar(1 + Math.sin(t * 3 + i) * 0.1);
+      });
+    });
+  },
+  'sorcerer-cloak': (ctx) =>
+    cloakPanels(ctx, [0.56, 0.52, 0.42, 0.3], [ctx.m.garment, ctx.m.glow], 0.26),
+  'sorcerer-boots': ({ m, knees }) => {
+    for (const knee of [knees.left, knees.right]) {
+      knee.add(box(0.23, 0.2, 0.3, m.dark, 0, -0.37, 0.02));
+      knee.add(box(0.2, 0.05, 0.26, m.glow, 0, -0.47, 0.01));
+    }
+  },
+  'sorcerer-aura': ({ auraRoot, m, onTick }) => {
+    // Loose magic arcing off at nobody's command, including yours.
+    const arcs = [...Array(9)].map(() => {
+      const mat = glowMat(m.palette.glow, 0.9);
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.26, 0.03), mat);
+      auraRoot.add(mesh);
+      return { mesh, mat, seed: Math.random() };
+    });
+    onTick((t) => {
+      arcs.forEach(({ mesh, mat, seed }, i) => {
+        const life = (t * 1.6 + seed * 3 + i * 0.2) % 1;
+        const a = seed * 12 + i;
+        mesh.position.set(Math.cos(a) * 0.5, 0.35 + life * 1.1, Math.sin(a) * 0.5);
+        mesh.rotation.set(seed * 6, a, life * 4);
+        mesh.scale.setScalar(1 - life * 0.4);
+        // Sharp on, sharp off: this is meant to look uncontrolled.
+        mat.opacity = life < 0.25 ? 0.9 : Math.max(0, 0.9 - (life - 0.25) * 2.4);
+      });
+    });
+  },
+
+  // --- Warlock
+  'warlock-head': ({ m, head, onTick }) => {
+    head.add(hood(m.dark, 0.42, 0.5));
+    const sigil = new THREE.Mesh(new THREE.OctahedronGeometry(0.07), m.glow);
+    sigil.position.set(0.22, 0.34, 0.14);
+    head.add(sigil);
+    onTick((t) => {
+      sigil.rotation.set(0, t * 0.9, t * 0.5);
+    });
+  },
+  'warlock-shoulders': ({ m, torso, onTick }) => {
+    // A hand resting on one shoulder. Deliberately only one.
+    torso.add(box(0.3, 0.12, 0.3, m.dark, -0.32, 0.68, 0));
+    const claws: THREE.Mesh[] = [];
+    for (let i = 0; i < 4; i++) {
+      const claw = box(0.045, 0.22, 0.045, m.dark, -0.42 + i * 0.075, 0.6, 0.04 + i * 0.02);
+      claw.rotation.z = 0.4 - i * 0.26;
+      torso.add(claw);
+      claws.push(claw);
+    }
+    onTick((t) => {
+      claws.forEach((claw, i) => {
+        claw.rotation.x = Math.sin(t * 0.7 + i * 0.5) * 0.08;
+      });
+    });
+  },
+  'warlock-weapon': ({ m, grips, onTick }) => {
+    const tome = tomeMesh(m, m.dark, m.glow);
+    grips.right.add(tome);
+    // The chain that keeps it from opening the rest of the way.
+    for (let i = 0; i < 4; i++) {
+      const link = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.012, 5, 10), m.metal);
+      link.position.set(0.02, 0.02 - i * 0.07, 0.12);
+      link.rotation.set(Math.PI / 2, (i % 2) * (Math.PI / 2), 0);
+      grips.right.add(link);
+    }
+    onTick((t) => {
+      m.glow.emissiveIntensity = 0.28 + Math.sin(t * 1.5) * 0.22;
+    });
+  },
+  'warlock-cloak': (ctx) => {
+    cloakPanels(ctx, [0.58, 0.56, 0.5, 0.44, 0.34], [ctx.m.dark, ctx.m.garment], 0.24);
+  },
+  'warlock-boots': ({ m, knees }) => {
+    for (const knee of [knees.left, knees.right]) {
+      knee.add(box(0.24, 0.24, 0.32, m.dark, 0, -0.35, 0.02));
+      knee.add(box(0.22, 0.04, 0.28, m.glow, 0, -0.24, 0.01));
+    }
+  },
+  'warlock-aura': ({ auraRoot, m, onTick }) => {
+    // An eye that opens above you. It is not looking at what you are.
+    // The pupil is the bright part, not the dark part: glowMat blends
+    // additively, so a black iris contributes nothing and the eye came out a
+    // featureless blob. Inverting it reads as an eye and is eerier besides.
+    const lidMat = glowMat(m.palette.glow, 0.5);
+    const eye = new THREE.Group();
+    const sclera = new THREE.Mesh(new THREE.SphereGeometry(0.19, 14, 10), lidMat);
+    sclera.scale.set(1, 0.5, 0.6);
+    const irisMat = glowMat(0xf2fff8, 0.95);
+    const iris = new THREE.Mesh(new THREE.SphereGeometry(0.075, 12, 10), irisMat);
+    iris.position.z = 0.12;
+    iris.scale.set(0.5, 1, 0.5);
+    eye.add(sclera, iris);
+    eye.position.set(0.42, 1.34, -0.34);
+    auraRoot.add(eye);
+    onTick((t) => {
+      // Open almost always, with one quick blink every few seconds. A sine
+      // here spent half its period below zero, which left the eye shut — and
+      // therefore invisible — for six seconds at a stretch.
+      const cycle = (t * 0.19) % 1;
+      const blink = cycle < 0.06 ? Math.abs(Math.cos((cycle / 0.06) * Math.PI)) : 1;
+      sclera.scale.y = 0.55 * blink;
+      eye.position.y = 1.34 + Math.sin(t * 0.8) * 0.05;
+      // Tracks something off to the side. Not you.
+      iris.position.x = Math.sin(t * 0.4) * 0.06;
+      // Faces mostly forward, drifting. Never quite at you.
+      eye.rotation.y = -0.5 + Math.sin(t * 0.35) * 0.3;
+      lidMat.opacity = 0.8 * blink;
+      irisMat.opacity = 0.95 * blink;
+    });
+  },
 };
 
 /** Robes are the class's body shape, not a cosmetic — gear never replaces them. */
@@ -888,8 +1309,7 @@ const CLASS_BODY: Partial<Record<ClassId, (m: Materials, torso: THREE.Group) => 
 };
 
 function buildCharacter(classId: ClassId, equipped: string[]) {
-  // Colour comes from the class's primary ability, silhouette from the class.
-  const m = buildMaterials(PALETTES[getClassDef(classId).primary[0]]);
+  const m = buildMaterials(CLASS_PALETTES[classId]);
   const root = new THREE.Group();
   /** Everything below the root, so the walk bob never fights the patrol path. */
   const body = new THREE.Group();
@@ -1065,7 +1485,7 @@ export function WalkingCharacter3D({
     const rig = buildCharacter(classId, loadout ? loadout.split(',') : []);
     scene.add(rig.root);
 
-    const aura = buildAura(PALETTES[getClassDef(classId).primary[0]].garment);
+    const aura = buildAura(CLASS_PALETTES[classId].garment);
     if (aura) scene.add(aura);
 
     const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
