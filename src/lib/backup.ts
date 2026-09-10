@@ -7,6 +7,7 @@ import type {
   Cosmetics,
   Inventory,
   CompletionEntry,
+  Goal,
   Habit,
   RedemptionEntry,
   ReminderSettings,
@@ -37,6 +38,7 @@ export interface BackupData {
   redemptions: RedemptionEntry[];
   bossVictories: BossVictory[];
   vacations: Vacation[];
+  goals: Goal[];
   settings?: ReminderSettings;
 }
 
@@ -359,6 +361,33 @@ function parseList<T>(raw: unknown, parse: (item: unknown) => T | null): T[] {
  * immediately, the user would be stuck in a crash loop with no way to reach
  * Settings to recover.
  */
+const GOAL_SCALES: Goal['scale'][] = ['modest', 'serious', 'major'];
+
+function parseGoal(raw: unknown): Goal | null {
+  if (!isObj(raw)) return null;
+  if (typeof raw.id !== 'string' || typeof raw.name !== 'string') return null;
+  if (typeof raw.attribute !== 'string' || !ATTRIBUTE_KEYS.includes(raw.attribute as AttributeKey)) return null;
+  if (typeof raw.deadline !== 'string' || !raw.deadline) return null;
+  const target = Math.max(1, Math.floor(finiteNum(raw.target, 1)));
+  return {
+    id: raw.id,
+    name: raw.name.slice(0, 70),
+    attribute: raw.attribute as AttributeKey,
+    target,
+    unit: typeof raw.unit === 'string' && raw.unit.trim() ? raw.unit.slice(0, 20) : 'times',
+    // Clamped to the target so a hand-edited file can't park a goal above its
+    // own finish line, where it would read as complete but never have paid.
+    progress: Math.max(0, Math.min(target, Math.floor(finiteNum(raw.progress, 0)))),
+    scale: GOAL_SCALES.includes(raw.scale as Goal['scale']) ? (raw.scale as Goal['scale']) : 'modest',
+    startedOn: typeof raw.startedOn === 'string' && raw.startedOn ? raw.startedOn : todayStr(),
+    deadline: raw.deadline,
+    // Kept, because it is what stops a completed goal paying out a second time
+    // the next time its counter is touched.
+    ...(typeof raw.completedOn === 'string' && raw.completedOn ? { completedOn: raw.completedOn } : {}),
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
+  };
+}
+
 export function parseBackup(json: string): ParseResult {
   let parsed: unknown;
   try {
@@ -397,6 +426,7 @@ export function parseBackup(json: string): ParseResult {
       redemptions: parseList(parsed.redemptions, parseRedemption),
       bossVictories: parseList(parsed.bossVictories, parseBossVictory),
       vacations: parseList(parsed.vacations, parseVacation),
+      goals: parseList(parsed.goals, parseGoal),
       settings: parseSettings(parsed.settings),
     },
   };

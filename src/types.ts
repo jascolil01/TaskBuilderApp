@@ -167,6 +167,33 @@ export interface CharacterState {
 }
 
 /**
+ * A long-term intention with a finish line: "read twelve books by December".
+ *
+ * Deliberately not a Habit. A quest asks "did you do it today?" and decays
+ * when the answer stops being yes; a goal asks "did you get there?" and simply
+ * expires if you don't. Keeping them as separate types is what stops the decay
+ * pass, the streak ladder and the weekly boss from ever seeing one.
+ */
+export interface Goal {
+  id: string;
+  name: string;
+  attribute: AttributeKey;
+  /** How many, and of what — "12" and "books". The unit is a label only. */
+  target: number;
+  unit: string;
+  progress: number;
+  /** Sets the payout. Not derived from `target`: 100 push-ups is not a bigger
+   *  commitment than 5 talks, though the number is twenty times larger. */
+  scale: 'modest' | 'serious' | 'major';
+  startedOn: string;
+  /** Inclusive. Past this, an unfinished goal is expired. */
+  deadline: string;
+  /** Set once, when the payout is handed over, so it can never be paid twice. */
+  completedOn?: string;
+  createdAt: string;
+}
+
+/**
  * A planned break. Every day it covers is forgiven by the decay pass, so
  * streaks survive a trip. Limited to two per calendar year and fourteen
  * days each.

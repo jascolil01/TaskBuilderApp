@@ -9,6 +9,7 @@ import type {
   CompletionEntry,
   Cosmetics,
   Frequency,
+  Goal,
   Habit,
   Inventory,
   RedemptionEntry,
@@ -62,6 +63,14 @@ import { type EffortTier, getEffortXp, inferEffort } from './lib/effort';
 import { clampTier, crossesTier, effectiveTier, getTierName, tierForStreak } from './lib/streak';
 import { type ClassId, getClassesForAttribute, getClassStanding, isClassId } from './lib/classes';
 import { resolveSecondary } from './lib/affinity';
+import {
+  clampProgress,
+  getGoalStatus,
+  getGoalTemplate,
+  GOAL_GOLD,
+  GOAL_XP,
+  suggestedDeadline,
+} from './lib/goals';
 import { getTemplate } from './lib/questCatalog';
 import { getForgivenDates, getForgivenSet } from './lib/forgiveness';
 import {
@@ -84,7 +93,7 @@ function makeId(): string {
 const DEFAULT_STARTERS = ['con-water', 'wis-bed', 'int-read'];
 
 /** Persisted schema version. Backups are stamped with it, so they agree. */
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 function starterRewards(): Reward[] {
   const now = new Date().toISOString();
@@ -107,6 +116,7 @@ interface Store {
   bossVictories: BossVictory[];
   bossWeek: BossWeek | null;
   vacations: Vacation[];
+  goals: Goal[];
   settings: ReminderSettings;
 
   setCharacterName: (name: string) => void;
@@ -148,6 +158,18 @@ interface Store {
   setGearEquipped: (id: string, equipped: boolean) => void;
   claimBossVictory: (forWeekStart?: string) => void;
 
+  addGoal: (input: {
+    name: string;
+    attribute: AttributeKey;
+    target: number;
+    unit: string;
+    scale: Goal['scale'];
+    deadline: string;
+  }) => void;
+  addGoalFromTemplate: (templateId: string) => void;
+  setGoalProgress: (id: string, next: number) => void;
+  deleteGoal: (id: string) => void;
+
   scheduleVacation: (startDate: string, endDate: string) => { ok: boolean; error?: string };
   cancelVacation: (id: string) => void;
   endVacationEarly: () => void;
@@ -187,6 +209,7 @@ function createInitialState() {
     bossVictories: [] as BossVictory[],
     bossWeek: null as BossWeek | null,
     vacations: [] as Vacation[],
+    goals: [] as Goal[],
   };
 }
 
@@ -1172,6 +1195,115 @@ export const useStore = create<Store>()(
         }));
       },
 
+      addGoal: (input) =>
+        set((state) => ({
+          goals: [
+            ...state.goals,
+            {
+              id: makeId(),
+              name: input.name.trim().slice(0, 70),
+              attribute: input.attribute,
+              target: Math.max(1, Math.floor(input.target)),
+              unit: input.unit.trim().slice(0, 20) || 'times',
+              progress: 0,
+              scale: input.scale,
+              startedOn: todayStr(),
+              deadline: input.deadline,
+              createdAt: new Date().toISOString(),
+            },
+          ],
+        })),
+
+      addGoalFromTemplate: (templateId) => {
+        const template = getGoalTemplate(templateId);
+        if (!template) return;
+        const state = get();
+        // Same rule as the quest catalog: browsing twice must not quietly give
+        // you two copies of the same intention.
+        if (state.goals.some((g) => g.name.trim().toLowerCase() === template.name.trim().toLowerCase())) {
+          useToastStore.getState().show('You already have that goal.');
+          return;
+        }
+        const today = todayStr();
+        set((s) => ({
+          goals: [
+            ...s.goals,
+            {
+              id: makeId(),
+              name: template.name,
+              attribute: template.attribute,
+              target: template.target,
+              unit: template.unit,
+              progress: 0,
+              scale: template.scale,
+              startedOn: today,
+              deadline: suggestedDeadline(template, today),
+              createdAt: new Date().toISOString(),
+            },
+          ],
+        }));
+        useToastStore.getState().show(`🎯 Goal set: ${template.name}`);
+      },
+
+      /**
+       * Moves a goal's counter, and pays out the moment it reaches its target.
+       *
+       * `completedOn` is the guard against paying twice: ticking to the target,
+       * back down, and up again is a legitimate correction, not a second
+       * achievement. The payout is deliberately not reversed on the way back
+       * down -- you did reach it.
+       */
+      setGoalProgress: (id, next) => {
+        const state = get();
+        const goal = state.goals.find((g) => g.id === id);
+        if (!goal) return;
+        const progress = clampProgress(goal, next);
+        if (progress === goal.progress) return;
+
+        const today = todayStr();
+        const finishing = progress >= goal.target && !goal.completedOn;
+        const expired = getGoalStatus(goal, today) === 'expired';
+
+        if (finishing && expired) {
+          // The deadline is the commitment. Landing the last unit after it has
+          // passed still counts as done -- it just doesn't pay.
+          useToastStore.getState().show('Finished, but past the deadline — no reward this time.');
+        } else if (finishing) {
+          const xp = GOAL_XP[goal.scale];
+          const gold = GOAL_GOLD[goal.scale];
+          useToastStore.getState().show(`🏆 ${goal.name} — complete! +${xp} ${goal.attribute}, +${gold} gold`);
+        }
+
+        set((s) => {
+          const goals = s.goals.map((g) =>
+            g.id === id
+              ? { ...g, progress, ...(finishing ? { completedOn: today } : {}) }
+              : g,
+          );
+          if (!finishing || expired) return { goals };
+
+          const xp = GOAL_XP[goal.scale];
+          const attributes: Attributes = {
+            ...s.character.attributes,
+            [goal.attribute]: addXp(s.character.attributes[goal.attribute], xp),
+          };
+          return {
+            goals,
+            character: {
+              ...s.character,
+              attributes,
+              gold: s.character.gold + GOAL_GOLD[goal.scale],
+              // Real XP, so it lifts the character level. It is deliberately
+              // absent from the completion log, which is what keeps the weekly
+              // boss and the per-quest stats from ever seeing it.
+              lifetimeXp: s.character.lifetimeXp + xp,
+            },
+          };
+        });
+      },
+
+      deleteGoal: (id) => set((state) => ({ goals: state.goals.filter((g) => g.id !== id) })),
+
       scheduleVacation: (startDate, endDate) => {
         const state = get();
         const check = validateVacation(state.vacations, startDate, endDate, todayStr());
@@ -1212,7 +1344,7 @@ export const useStore = create<Store>()(
       resetAll: () => set(createInitialState()),
 
       exportData: () => {
-        const { character, habits, completions, rewards, redemptions, bossVictories, bossWeek, vacations, settings } =
+        const { character, habits, completions, rewards, redemptions, bossVictories, bossWeek, vacations, goals, settings } =
           get();
         return JSON.stringify(
           {
@@ -1226,6 +1358,7 @@ export const useStore = create<Store>()(
             bossVictories,
             bossWeek,
             vacations,
+            goals,
             settings,
           },
           null,
@@ -1247,6 +1380,7 @@ export const useStore = create<Store>()(
           bossVictories: data.bossVictories,
           bossWeek: null,
           vacations: data.vacations,
+          goals: data.goals,
           ...(data.settings ? { settings: data.settings } : {}),
         });
         return { ok: true };
@@ -1307,7 +1441,13 @@ export const useStore = create<Store>()(
         });
 
         if (fromVersion >= 4) {
-          return { ...state, character: withGear, habits: upgradedHabits } as Store;
+          return {
+            ...state,
+            character: withGear,
+            habits: upgradedHabits,
+            // v10: the screen reads this unconditionally, so it can't be undefined.
+            goals: Array.isArray(state.goals) ? state.goals : [],
+          } as Store;
         }
 
         // v1 had no lifetimeXp and no cheat-day state. Seed lifetime XP from
@@ -1348,6 +1488,8 @@ export const useStore = create<Store>()(
           bossWeek: null,
           // v4: vacations.
           vacations: Array.isArray(state.vacations) ? state.vacations : [],
+          // v10: long-term goals.
+          goals: Array.isArray(state.goals) ? state.goals : [],
         } as Store;
       },
     },

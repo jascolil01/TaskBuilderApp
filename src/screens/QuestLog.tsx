@@ -8,6 +8,8 @@ import { getActiveVacation } from '../lib/vacation';
 import { isScheduledDay } from '../lib/rpg';
 import { AddEditHabit } from './AddEditHabit';
 import { QuestBrowser } from './QuestBrowser';
+import { Goals } from './Goals';
+import { getGoalStatus } from '../lib/goals';
 
 export function QuestLog() {
   const habits = useStore((s) => s.habits);
@@ -46,11 +48,28 @@ export function QuestLog() {
     [active, today],
   );
 
+  const goals = useStore((s) => s.goals);
+  const [goalsOpen, setGoalsOpen] = useState(false);
+  // Only goals still in play get a badge; a finished one is not something
+  // you still owe.
+  const activeGoals = goals.filter((g) => getGoalStatus(g) === 'active').length;
+
   return (
     <div className="flex flex-col gap-4 px-4 pb-28 pt-6">
       <div className="flex items-center justify-between">
         <h1 className="font-display text-xl font-bold text-gold-300">Quest Log</h1>
         <div className="flex gap-2">
+          <button
+            onClick={() => setGoalsOpen(true)}
+            className="relative rounded-full border border-white/20 px-3.5 py-1.5 text-sm font-medium text-white/65 active:scale-95"
+          >
+            🎯 Goals
+            {activeGoals > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-gold-500 px-1 text-[10px] font-bold text-ink-950">
+                {activeGoals}
+              </span>
+            )}
+          </button>
           <button
             onClick={() => setBrowsing(true)}
             className="rounded-full border border-white/20 px-3.5 py-1.5 text-sm font-medium text-white/65 active:scale-95"
@@ -138,6 +157,7 @@ export function QuestLog() {
 
       {editing && <AddEditHabit habit={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
       {browsing && <QuestBrowser onClose={() => setBrowsing(false)} />}
+      {goalsOpen && <Goals onClose={() => setGoalsOpen(false)} />}
     </div>
   );
 }
