@@ -61,6 +61,7 @@ import {
 import { type EffortTier, getEffortXp, inferEffort } from './lib/effort';
 import { clampTier, crossesTier, effectiveTier, getTierName, tierForStreak } from './lib/streak';
 import { type ClassId, getClassesForAttribute, getClassStanding, isClassId } from './lib/classes';
+import { resolveSecondary } from './lib/affinity';
 import { getTemplate } from './lib/questCatalog';
 import { getForgivenDates, getForgivenSet } from './lib/forgiveness';
 import {
@@ -83,7 +84,7 @@ function makeId(): string {
 const DEFAULT_STARTERS = ['con-water', 'wis-bed', 'int-read'];
 
 /** Persisted schema version. Backups are stamped with it, so they agree. */
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 function starterRewards(): Reward[] {
   const now = new Date().toISOString();
@@ -119,13 +120,14 @@ interface Store {
   addHabit: (input: {
     name: string;
     attribute: AttributeKey;
+    secondary?: AttributeKey | null;
     frequency: Frequency;
     graceDays: number;
     effort: EffortTier;
   }) => void;
   updateHabit: (
     id: string,
-    patch: Partial<Pick<Habit, 'name' | 'attribute' | 'frequency' | 'graceDays' | 'effort'>>,
+    patch: Partial<Pick<Habit, 'name' | 'attribute' | 'secondary' | 'frequency' | 'graceDays' | 'effort'>>,
   ) => void;
   archiveHabit: (id: string) => void;
   deleteHabit: (id: string) => void;
@@ -395,6 +397,7 @@ export const useStore = create<Store>()(
             id: makeId(),
             name: template.name,
             attribute: template.attribute,
+            secondary: resolveSecondary(template.attribute, template.secondary),
             frequency: template.frequency,
             graceDays: template.graceDays,
             effort: template.effort,
@@ -421,6 +424,9 @@ export const useStore = create<Store>()(
               id: makeId(),
               name: input.name.trim().slice(0, 60),
               attribute: input.attribute,
+              // Validated on the way in: a pairing the table doesn't allow is
+              // dropped rather than stored, so nothing downstream has to guard.
+              secondary: resolveSecondary(input.attribute, input.secondary),
               frequency: input.frequency,
               graceDays: input.graceDays,
               effort: input.effort,
@@ -439,12 +445,15 @@ export const useStore = create<Store>()(
 
       updateHabit: (id, patch) =>
         set((state) => ({
-          habits: state.habits.map((h) =>
+          habits: state.habits.map((h) => {
+            if (h.id !== id) return h;
             // xpReward is derived from the tier, so it has to move with it.
-            h.id === id
-              ? { ...h, ...patch, ...(patch.effort ? { xpReward: getEffortXp(patch.effort) } : {}) }
-              : h,
-          ),
+            const merged = { ...h, ...patch, ...(patch.effort ? { xpReward: getEffortXp(patch.effort) } : {}) };
+            // Re-checked after the merge, not before: changing the primary can
+            // strand a secondary that was valid a moment ago, and a Strength
+            // quest moved to Intelligence must not keep Constitution attached.
+            return { ...merged, secondary: resolveSecondary(merged.attribute, merged.secondary) };
+          }),
         })),
 
       archiveHabit: (id) =>
@@ -484,6 +493,9 @@ export const useStore = create<Store>()(
           xpAwarded: award.xp,
           baseXp: award.baseXp,
           goldAwarded: award.gold,
+          ...(award.secondaryAttribute
+            ? { secondaryAttribute: award.secondaryAttribute, secondaryXp: award.secondaryXp }
+            : {}),
           elixirUsed: award.elixirUsed || undefined,
           prevProgress: {
             streak: habit.streak,
@@ -536,6 +548,15 @@ export const useStore = create<Store>()(
               attributes[key] = addXp(attributes[key], award.spilloverXp);
               spilled += award.spilloverXp;
             }
+          }
+          // The quest's secondary attribute. Real XP, so it counts toward the
+          // lifetime total, but it earns no streak and can never decay.
+          if (award.secondaryAttribute && award.secondaryXp > 0) {
+            attributes[award.secondaryAttribute] = addXp(
+              attributes[award.secondaryAttribute],
+              award.secondaryXp,
+            );
+            spilled += award.secondaryXp;
           }
 
           let character: CharacterState = {
@@ -628,6 +649,9 @@ export const useStore = create<Store>()(
           xpAwarded: award.xp,
           baseXp: award.baseXp,
           goldAwarded: award.gold,
+          ...(award.secondaryAttribute
+            ? { secondaryAttribute: award.secondaryAttribute, secondaryXp: award.secondaryXp }
+            : {}),
           backfilled: true,
           ...(plan.xpRefund > 0 ? { xpRefunded: plan.xpRefund } : {}),
           prevProgress: {
@@ -668,6 +692,15 @@ export const useStore = create<Store>()(
               attributes[key] = addXp(attributes[key], award.spilloverXp);
               spilled += award.spilloverXp;
             }
+          }
+          // The quest's secondary attribute. Real XP, so it counts toward the
+          // lifetime total, but it earns no streak and can never decay.
+          if (award.secondaryAttribute && award.secondaryXp > 0) {
+            attributes[award.secondaryAttribute] = addXp(
+              attributes[award.secondaryAttribute],
+              award.secondaryXp,
+            );
+            spilled += award.secondaryXp;
           }
           let character: CharacterState = {
             ...s.character,
@@ -772,6 +805,14 @@ export const useStore = create<Store>()(
           // Mirror the Deep Work spillover this completion handed out, so the
           // other five attributes don't keep XP from an undone quest.
           let spilled = 0;
+          // The secondary is reversed from what the entry recorded, not from
+          // what the quest says now — its secondary may have been edited since.
+          const secondaryKey = todaysEntry.secondaryAttribute;
+          const secondaryAmount = todaysEntry.secondaryXp ?? 0;
+          if (secondaryKey && secondaryAmount > 0) {
+            attributes[secondaryKey] = removeXp(attributes[secondaryKey], secondaryAmount);
+            spilled += secondaryAmount;
+          }
           if (habit.attribute === 'INT' && hasSignature(s.character.attributes, 'deep-work')) {
             const spill = Math.floor(todaysEntry.xpAwarded * DEEP_WORK_SPILL);
             if (spill > 0) {
@@ -1254,6 +1295,12 @@ export const useStore = create<Store>()(
         const upgradedHabits = (Array.isArray(state.habits) ? state.habits : []).map((h) => {
           const withTier =
             h.bonusTier === undefined ? { ...h, bonusTier: tierForStreak(h.streak ?? 0) } : h;
+          // v9: quests can name a secondary attribute. Existing ones get none —
+          // guessing one for a quest whose name we can't read would attach XP
+          // to an attribute the player never agreed to.
+          if (withTier.secondary !== undefined) {
+            withTier.secondary = resolveSecondary(withTier.attribute, withTier.secondary);
+          }
           if (withTier.effort) return withTier;
           const effort = inferEffort(withTier.xpReward ?? 20);
           return { ...withTier, effort, xpReward: getEffortXp(effort) };

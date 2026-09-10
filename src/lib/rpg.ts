@@ -2,6 +2,7 @@ import type { AttributeKey, AttributeState, Attributes, Habit } from '../types';
 import { addDays, dayOfWeek } from './date';
 import { getEffortGold, inferEffort } from './effort';
 import { clampTier, effectiveTier, getStreakBonus, MAX_TIER_INDEX, tierForStreak } from './streak';
+import { getSecondaryXp, resolveSecondary } from './affinity';
 
 export const ATTRIBUTE_KEYS: AttributeKey[] = ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA'];
 
@@ -330,6 +331,9 @@ export interface CompletionAward {
   gold: number;
   /** XP spilled to every other attribute by Deep Work. */
   spilloverXp: number;
+  /** The quest's secondary attribute and what it earned, if it has one. */
+  secondaryAttribute: AttributeKey | null;
+  secondaryXp: number;
   doubled: boolean;
   /** True when an Elixir of Might charge was consumed for this completion. */
   elixirUsed: boolean;
@@ -390,6 +394,11 @@ export function getCompletionAward(
       ? Math.floor(xp * DEEP_WORK_SPILL)
       : 0;
 
+  // A lesser share to the attribute the quest also builds. It earns no streak
+  // tier of its own and never decays — it rides along, it isn't a second quest.
+  const secondaryAttribute = resolveSecondary(habit.attribute, habit.secondary);
+  const secondaryXp = getSecondaryXp(xp, secondaryAttribute !== null);
+
   return {
     xp,
     baseXp: habit.xpReward,
@@ -399,6 +408,8 @@ export function getCompletionAward(
     elixirUsed: elixirActive,
     streakTier,
     streakBonus,
+    secondaryAttribute,
+    secondaryXp,
   };
 }
 

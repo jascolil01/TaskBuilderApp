@@ -10,6 +10,7 @@ import {
   nextTier,
   tierForStreak,
 } from '../lib/streak';
+import { getSecondaryXp, resolveSecondary } from '../lib/affinity';
 import { addDays, todayStr, weekdayLabel } from '../lib/date';
 
 export function HabitCard({
@@ -41,6 +42,11 @@ export function HabitCard({
   // The rung is carried over from a run that has since broken, rather than
   // earned by the streak showing right now.
   const held = tier > tierForStreak(habit.streak);
+
+  // What the side attribute earns, shown at the quest's face value — the same
+  // basis the primary figure beside it uses.
+  const secondary = resolveSecondary(habit.attribute, habit.secondary);
+  const secondaryXp = getSecondaryXp(habit.xpReward, secondary !== null);
 
   // Offered only where it makes sense: a scheduled day, one day back, that the
   // quest existed for and has no completion yet.
@@ -91,6 +97,11 @@ export function HabitCard({
             </span>
             <span className="shrink-0 text-right text-xs font-display" style={{ color: info.color }}>
               +{habit.xpReward} {habit.attribute}
+              {secondary && (
+                <span className="ml-1 opacity-60" style={{ color: ATTRIBUTE_INFO[secondary].color }}>
+                  +{secondaryXp} {secondary}
+                </span>
+              )}
               <span className="ml-1.5 text-gold-400/80">🪙{getEffortGold(habit.effort ?? inferEffort(habit.xpReward))}</span>
             </span>
           </div>

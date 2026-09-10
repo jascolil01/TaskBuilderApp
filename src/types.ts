@@ -17,6 +17,14 @@ export interface Habit {
   id: string;
   name: string;
   attribute: AttributeKey;
+  /**
+   * An attribute this quest also builds, a little. Restricted to the pairings
+   * in lib/affinity — a free choice would only ever be used to farm whichever
+   * attribute the player wanted next, and then the attributes stop describing
+   * anything. Always read through resolveSecondary: editing the primary can
+   * strand a secondary that no longer makes sense.
+   */
+  secondary?: AttributeKey | null;
   frequency: Frequency;
   graceDays: number;
   /**
@@ -75,6 +83,13 @@ export interface CompletionEntry {
    * scored in them too. Absent on entries written before this was introduced.
    */
   baseXp?: number;
+  /**
+   * What the secondary attribute was paid, and which one. Recorded rather than
+   * recomputed so undo reverses exactly what was given — the quest's secondary
+   * may have been edited since, and guessing would leave XP behind.
+   */
+  secondaryXp?: number;
+  secondaryAttribute?: AttributeKey;
   /** Set when an Elixir of Might charge paid for this completion, so undo can refund it. */
   elixirUsed?: boolean;
   /** Logged after the fact rather than on the day, so the Chronicle can say so. */

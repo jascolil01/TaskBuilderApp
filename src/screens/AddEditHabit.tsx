@@ -9,6 +9,7 @@ import {
 } from '../lib/effort';
 import type { AttributeKey, Frequency, Habit } from '../types';
 import { ATTRIBUTE_INFO, ATTRIBUTE_KEYS } from '../lib/rpg';
+import { getAffinities, resolveSecondary, SECONDARY_SHARE } from '../lib/affinity';
 import { weekdayLabel } from '../lib/date';
 
 export function AddEditHabit({ habit, onClose }: { habit: Habit | null; onClose: () => void }) {
@@ -20,6 +21,11 @@ export function AddEditHabit({ habit, onClose }: { habit: Habit | null; onClose:
 
   const [name, setName] = useState(habit?.name ?? '');
   const [attribute, setAttribute] = useState<AttributeKey>(habit?.attribute ?? 'STR');
+  const [secondary, setSecondary] = useState<AttributeKey | null>(habit?.secondary ?? null);
+  // Changing the primary can strand the secondary, so the options are derived
+  // and the selection is re-checked rather than left to go stale.
+  const affinities = getAffinities(attribute);
+  const validSecondary = resolveSecondary(attribute, secondary);
   const [isDaily, setIsDaily] = useState(habit ? habit.frequency.type === 'daily' : true);
   const [days, setDays] = useState<number[]>(
     habit && habit.frequency.type === 'weekly' ? habit.frequency.days : [1, 2, 3, 4, 5],
@@ -35,9 +41,9 @@ export function AddEditHabit({ habit, onClose }: { habit: Habit | null; onClose:
     if (!canSave) return;
     const frequency: Frequency = isDaily ? { type: 'daily' } : { type: 'weekly', days };
     if (habit) {
-      updateHabit(habit.id, { name, attribute, frequency, graceDays, effort });
+      updateHabit(habit.id, { name, attribute, secondary: validSecondary, frequency, graceDays, effort });
     } else {
-      addHabit({ name, attribute, frequency, graceDays, effort });
+      addHabit({ name, attribute, secondary: validSecondary, frequency, graceDays, effort });
     }
     onClose();
   };
@@ -67,6 +73,42 @@ export function AddEditHabit({ habit, onClose }: { habit: Habit | null; onClose:
                 key={key}
                 onClick={() => setAttribute(key)}
                 className={`rounded-lg border px-2 py-2 text-xs font-medium transition-colors ${
+                  selected ? 'border-gold-500 bg-gold-500/15 text-gold-300' : 'border-white/15 text-white/60'
+                }`}
+              >
+                {info.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <label className="mt-5 block text-xs uppercase tracking-wide text-white/50">
+          Also builds <span className="text-white/30">(optional)</span>
+        </label>
+        <p className="mt-1 text-[11px] text-white/35">
+          A quest can serve two things. The second earns {Math.round(SECONDARY_SHARE * 100)}% of the XP, builds no
+          streak of its own, and never decays. Only attributes that plausibly follow from{' '}
+          {ATTRIBUTE_INFO[attribute].label} are offered.
+        </p>
+        <div className="mt-1.5 flex gap-2">
+          <button
+            onClick={() => setSecondary(null)}
+            className={`flex-1 rounded-lg border px-2 py-2 text-xs font-medium transition-colors ${
+              validSecondary === null
+                ? 'border-gold-500 bg-gold-500/15 text-gold-300'
+                : 'border-white/15 text-white/60'
+            }`}
+          >
+            Nothing
+          </button>
+          {affinities.map((key) => {
+            const info = ATTRIBUTE_INFO[key];
+            const selected = validSecondary === key;
+            return (
+              <button
+                key={key}
+                onClick={() => setSecondary(key)}
+                className={`flex-1 rounded-lg border px-2 py-2 text-xs font-medium transition-colors ${
                   selected ? 'border-gold-500 bg-gold-500/15 text-gold-300' : 'border-white/15 text-white/60'
                 }`}
               >

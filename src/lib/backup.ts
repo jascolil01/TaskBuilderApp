@@ -17,6 +17,7 @@ import { getEffortXp, inferEffort, isEffortTier } from './effort';
 import { ATTRIBUTE_KEYS, SIGNATURE_LEVEL } from './rpg';
 import { clampTier, tierForStreak } from './streak';
 import { isClassId } from './classes';
+import { isValidPairing } from './affinity';
 import {
   COSMETIC_RINGS,
   COSMETIC_TITLES,
@@ -194,6 +195,12 @@ function parseHabit(raw: unknown): Habit | null {
     id: raw.id,
     name: raw.name.slice(0, 60),
     attribute: raw.attribute as AttributeKey,
+    // Validated against the affinity table, not merely type-checked: a
+    // hand-edited backup must not be able to attach Intelligence to a
+    // Strength quest when the picker would have refused it.
+    secondary: isValidPairing(raw.attribute as AttributeKey, raw.secondary as AttributeKey)
+      ? (raw.secondary as AttributeKey)
+      : null,
     frequency,
     graceDays: Math.max(0, Math.floor(finiteNum(raw.graceDays, 2))),
     // XP is the tier's value, never a free number — an imported file can't
@@ -239,6 +246,12 @@ function parseCompletion(raw: unknown): CompletionEntry | null {
   if (raw.backfilled === true) entry.backfilled = true;
   if (raw.baseXp !== undefined) {
     entry.baseXp = Math.min(xpAwarded, Math.max(0, Math.floor(finiteNum(raw.baseXp, 0))));
+  }
+  // Clamped to the primary award for the same reason baseXp is: undo subtracts
+  // this, and a hand-edited figure would let an undo mint XP.
+  if (typeof raw.secondaryAttribute === 'string' && ATTRIBUTE_KEYS.includes(raw.secondaryAttribute as AttributeKey)) {
+    entry.secondaryAttribute = raw.secondaryAttribute as AttributeKey;
+    entry.secondaryXp = Math.min(xpAwarded, Math.max(0, Math.floor(finiteNum(raw.secondaryXp, 0))));
   }
   const prev = raw.prevProgress;
   if (isObj(prev)) {
