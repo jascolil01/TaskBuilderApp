@@ -95,6 +95,12 @@ export interface CompletionEntry {
   /** Logged after the fact rather than on the day, so the Chronicle can say so. */
   backfilled?: boolean;
   /**
+   * A line about how it actually went, written by you. Optional and never
+   * prompted for — the point is that the Chronicle becomes something you'd
+   * reread, and a form you're made to fill in is a form you stop filling in.
+   */
+  note?: string;
+  /**
    * Decay XP handed back because this backfill cancelled a miss. Recorded so
    * undo can reverse exactly what was given, rather than guessing — the same
    * reason prevProgress exists.

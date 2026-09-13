@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useStore } from '../store';
 import type { Habit } from '../types';
 import { ATTRIBUTE_INFO, isAtRisk, isDecaying, isScheduledDay } from '../lib/rpg';
@@ -26,6 +27,8 @@ export function HabitCard({
   const undoCompleteHabit = useStore((s) => s.undoCompleteHabit);
   const backfillYesterday = useStore((s) => s.backfillYesterday);
   const completions = useStore((s) => s.completions);
+  const setCompletionNote = useStore((s) => s.setCompletionNote);
+  const [noteOpen, setNoteOpen] = useState(false);
   const info = ATTRIBUTE_INFO[habit.attribute];
   const doneToday = habit.lastCompletedDate === todayStr();
   const attributes = useStore((s) => s.character.attributes);
@@ -48,8 +51,12 @@ export function HabitCard({
   const secondary = resolveSecondary(habit.attribute, habit.secondary);
   const secondaryXp = getSecondaryXp(habit.xpReward, secondary !== null);
 
-  // Offered only where it makes sense: a scheduled day, one day back, that the
-  // quest existed for and has no completion yet.
+  // The note belongs to the day, so it's only offered once the day is logged.
+  const todayEntry = completions.find((c) => c.habitId === habit.id && c.date === todayStr());
+  const note = todayEntry?.note ?? '';
+
+  // Backfill is offered only where it makes sense: a scheduled day, one day
+  // back, that the quest existed for and has no completion yet.
   const yesterday = addDays(todayStr(), -1);
   const yesterdayEntry = completions.find((c) => c.habitId === habit.id && c.date === yesterday);
   const canBackfill =
@@ -148,6 +155,35 @@ export function HabitCard({
           📜 Logged for yesterday · Undo
         </button>
       )}
+
+      {/* Only once today is logged: a note is about how it went, which you
+          can't say yet. Never prompted — an optional line you're made to fill
+          in is a line you stop filling in. */}
+      {doneToday &&
+        (noteOpen ? (
+          <input
+            autoFocus
+            defaultValue={note}
+            maxLength={140}
+            placeholder="How did it go?"
+            onBlur={(e) => {
+              setCompletionNote(habit.id, todayStr(), e.target.value);
+              setNoteOpen(false);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur();
+              if (e.key === 'Escape') setNoteOpen(false);
+            }}
+            className="mt-2 w-full rounded-lg border border-white/15 bg-ink-950/60 px-3 py-1.5 text-[12px] text-white/80 placeholder:text-white/25 focus:border-gold-500/50 focus:outline-none"
+          />
+        ) : (
+          <button
+            onClick={() => setNoteOpen(true)}
+            className="mt-2 w-full rounded-lg border border-white/10 px-3 py-1.5 text-left text-[11px] text-white/35 active:scale-[0.98]"
+          >
+            {note ? <span className="italic text-white/55">&ldquo;{note}&rdquo;</span> : '✎ Add a note'}
+          </button>
+        ))}
     </div>
   );
 }

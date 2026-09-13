@@ -153,6 +153,7 @@ interface Store {
   completeHabit: (id: string) => void;
   undoCompleteHabit: (id: string, date?: string) => void;
   backfillYesterday: (id: string) => void;
+  setCompletionNote: (habitId: string, date: string, note: string) => void;
 
   addReward: (input: { name: string; tier: RewardTier }) => void;
   updateReward: (id: string, patch: Partial<Pick<Reward, 'name' | 'tier'>>) => void;
@@ -888,6 +889,22 @@ export const useStore = create<Store>()(
             completions: remaining,
           };
         });
+      },
+
+      /**
+       * Attaches (or clears) a line on the completion for that day. Stored on
+       * the completion rather than the quest so it belongs to the occasion:
+       * "shattered today" is true of one Tuesday, not of running in general.
+       */
+      setCompletionNote: (habitId, date, note) => {
+        const trimmed = note.trim().slice(0, 140);
+        set((state) => ({
+          completions: state.completions.map((c) =>
+            c.habitId === habitId && c.date === date
+              ? { ...c, ...(trimmed ? { note: trimmed } : { note: undefined }) }
+              : c,
+          ),
+        }));
       },
 
       addReward: (input) =>

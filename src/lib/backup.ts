@@ -246,6 +246,7 @@ function parseCompletion(raw: unknown): CompletionEntry | null {
   // multipliers, so it can never exceed what was actually paid out, and a
   // hand-edited file must not be able to inflate boss progress.
   if (raw.backfilled === true) entry.backfilled = true;
+  if (typeof raw.note === 'string' && raw.note.trim()) entry.note = raw.note.trim().slice(0, 140);
   if (raw.baseXp !== undefined) {
     entry.baseXp = Math.min(xpAwarded, Math.max(0, Math.floor(finiteNum(raw.baseXp, 0))));
   }

@@ -15,6 +15,7 @@ type FeedEntry = {
   color: string;
   /** Logged after the fact, so the log says so rather than looking identical. */
   backfilled?: boolean;
+  note?: string;
 };
 
 export function Chronicle() {
@@ -44,6 +45,7 @@ export function Chronicle() {
       icon: '✅',
       label: habitNameById.get(c.habitId) ?? 'Quest',
       backfilled: c.backfilled === true,
+      note: c.note,
       detail: `+${c.xpAwarded} XP · +${c.goldAwarded}🪙`,
       color: 'text-verdant-400',
     }));
@@ -110,8 +112,9 @@ export function Chronicle() {
             {feed.map((entry) => (
               <div
                 key={entry.id}
-                className="flex items-center justify-between rounded-lg bg-ink-800/30 px-3 py-2 text-sm"
+                className="rounded-lg bg-ink-800/30 px-3 py-2 text-sm"
               >
+                <div className="flex items-center justify-between">
                 <span className="flex min-w-0 items-center gap-2">
                   <span>{entry.icon}</span>
                   <span className="truncate text-white/80">{entry.label}</span>
@@ -123,6 +126,12 @@ export function Chronicle() {
                   )}
                   <span className="ml-2 text-white/30">{entry.date.slice(5)}</span>
                 </span>
+                </div>
+                {entry.note && (
+                  <p className="mt-1 border-l-2 border-white/10 pl-2 text-[12px] italic leading-relaxed text-white/45">
+                    {entry.note}
+                  </p>
+                )}
               </div>
             ))}
           </div>
