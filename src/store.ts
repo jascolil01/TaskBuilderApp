@@ -64,6 +64,7 @@ import { clampTier, crossesTier, effectiveTier, getTierName, tierForStreak } fro
 import { type ClassId, getClassesForAttribute, getClassStanding, isClassId } from './lib/classes';
 import { resolveSecondary } from './lib/affinity';
 import { haptic } from './lib/haptics';
+import { type Suggestion, snoozeUntil } from './lib/coach';
 import {
   clampProgress,
   getGoalStatus,
@@ -118,6 +119,12 @@ interface Store {
   bossWeek: BossWeek | null;
   vacations: Vacation[];
   goals: Goal[];
+  /**
+   * Quest id -> the date a coaching suggestion for it stops being snoozed.
+   * Kept out of Habit so dismissing advice never touches quest data, and so a
+   * deleted quest's dismissal simply becomes irrelevant rather than orphaned.
+   */
+  coachSnoozed: Record<string, string>;
   settings: ReminderSettings;
 
   setCharacterName: (name: string) => void;
@@ -172,6 +179,9 @@ interface Store {
   setGoalProgress: (id: string, next: number) => void;
   deleteGoal: (id: string) => void;
 
+  applySuggestion: (s: Suggestion) => void;
+  dismissSuggestion: (habitId: string) => void;
+
   scheduleVacation: (startDate: string, endDate: string) => { ok: boolean; error?: string };
   cancelVacation: (id: string) => void;
   endVacationEarly: () => void;
@@ -212,6 +222,7 @@ function createInitialState() {
     bossWeek: null as BossWeek | null,
     vacations: [] as Vacation[],
     goals: [] as Goal[],
+    coachSnoozed: {} as Record<string, string>,
   };
 }
 
@@ -1320,6 +1331,37 @@ export const useStore = create<Store>()(
 
       deleteGoal: (id) => set((state) => ({ goals: state.goals.filter((g) => g.id !== id) })),
 
+      /**
+       * Applies a coaching suggestion, and snoozes that quest either way.
+       *
+       * Acting on the advice is also a decision about it, so the quest goes
+       * quiet afterwards regardless: a quest just made smaller needs a month
+       * at the new size before its rate means anything again.
+       */
+      applySuggestion: (suggestion) => {
+        const state = get();
+        const habit = state.habits.find((h) => h.id === suggestion.habitId);
+        if (!habit) return;
+
+        haptic('tick');
+        if (suggestion.kind === 'retire') {
+          get().archiveHabit(habit.id);
+          useToastStore.getState().show(`${habit.name} retired. It's in the Chronicle if you want it back.`);
+        } else if (suggestion.kind === 'easier' && suggestion.toEffort) {
+          get().updateHabit(habit.id, { effort: suggestion.toEffort });
+          useToastStore.getState().show(`${habit.name} is now a smaller ask. Easier to keep.`);
+        } else if (suggestion.kind === 'less-often' && suggestion.toDays?.length) {
+          get().updateHabit(habit.id, { frequency: { type: 'weekly', days: suggestion.toDays } });
+          useToastStore
+            .getState()
+            .show(`${habit.name} now asks ${suggestion.toDays.length} days a week.`);
+        }
+        set((s) => ({ coachSnoozed: { ...s.coachSnoozed, [habit.id]: snoozeUntil() } }));
+      },
+
+      dismissSuggestion: (habitId) =>
+        set((state) => ({ coachSnoozed: { ...state.coachSnoozed, [habitId]: snoozeUntil() } })),
+
       scheduleVacation: (startDate, endDate) => {
         const state = get();
         const check = validateVacation(state.vacations, startDate, endDate, todayStr());
@@ -1464,8 +1506,10 @@ export const useStore = create<Store>()(
             ...state,
             character: withGear,
             habits: upgradedHabits,
-            // v10: the screen reads this unconditionally, so it can't be undefined.
+            // v10/v11: both are read unconditionally, so neither can be undefined.
             goals: Array.isArray(state.goals) ? state.goals : [],
+            coachSnoozed:
+              typeof state.coachSnoozed === 'object' && state.coachSnoozed ? state.coachSnoozed : {},
           } as Store;
         }
 
@@ -1509,6 +1553,8 @@ export const useStore = create<Store>()(
           vacations: Array.isArray(state.vacations) ? state.vacations : [],
           // v10: long-term goals.
           goals: Array.isArray(state.goals) ? state.goals : [],
+          // v11: coaching dismissals.
+          coachSnoozed: typeof state.coachSnoozed === 'object' && state.coachSnoozed ? state.coachSnoozed : {},
         } as Store;
       },
     },

@@ -9,6 +9,7 @@ import { isScheduledDay } from '../lib/rpg';
 import { AddEditHabit } from './AddEditHabit';
 import { QuestBrowser } from './QuestBrowser';
 import { Goals } from './Goals';
+import { CoachCard } from '../components/CoachCard';
 import { getGoalStatus } from '../lib/goals';
 
 export function QuestLog() {
@@ -56,12 +57,12 @@ export function QuestLog() {
 
   return (
     <div className="flex flex-col gap-4 px-4 pb-28 pt-6">
-      <div className="flex items-center justify-between">
-        <h1 className="font-display text-xl font-bold text-gold-300">Quest Log</h1>
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="shrink-0 whitespace-nowrap font-display text-xl font-bold text-gold-300">Quest Log</h1>
         <div className="flex gap-2">
           <button
             onClick={() => setGoalsOpen(true)}
-            className="relative rounded-full border border-white/20 px-3.5 py-1.5 text-sm font-medium text-white/65 active:scale-95"
+            className="relative shrink-0 rounded-full border border-white/20 px-2.5 py-1.5 text-[13px] font-medium text-white/65 active:scale-95"
           >
             🎯 Goals
             {activeGoals > 0 && (
@@ -72,13 +73,13 @@ export function QuestLog() {
           </button>
           <button
             onClick={() => setBrowsing(true)}
-            className="rounded-full border border-white/20 px-3.5 py-1.5 text-sm font-medium text-white/65 active:scale-95"
+            className="shrink-0 rounded-full border border-white/20 px-2.5 py-1.5 text-[13px] font-medium text-white/65 active:scale-95"
           >
             💡 Ideas
           </button>
           <button
             onClick={() => setEditing('new')}
-            className="rounded-full border border-gold-500/60 bg-gold-500/10 px-4 py-1.5 text-sm font-medium text-gold-300 active:scale-95"
+            className="shrink-0 rounded-full border border-gold-500/60 bg-gold-500/10 px-3 py-1.5 text-[13px] font-medium text-gold-300 active:scale-95"
           >
             + New
           </button>
@@ -97,6 +98,10 @@ export function QuestLog() {
           </div>
         )
       )}
+
+      {/* Below the day's status, above the list: seen on the way to the
+          quests rather than instead of them. */}
+      <CoachCard />
 
       {active.length === 0 ? (
         <div className="parchment-border mt-4 rounded-2xl bg-ink-800/50 p-6 text-center text-white/60">
