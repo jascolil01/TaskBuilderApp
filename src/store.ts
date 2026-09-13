@@ -73,6 +73,7 @@ import {
   GOAL_XP,
   suggestedDeadline,
 } from './lib/goals';
+import { getBossSetup, indexHabits } from './lib/bossContext';
 import { getTemplate } from './lib/questCatalog';
 import { getForgivenDates, getForgivenSet } from './lib/forgiveness';
 import {
@@ -376,11 +377,14 @@ export const useStore = create<Store>()(
           // The boss target is a floor, not a snapshot: archiving a quest can't
           // lower a bar you'd already missed, but adding quests still raises it.
           const weekStart = getWeekStart(today);
+          const { modifier, ctx } = getBossSetup(weekStart, baseAttributes);
           const threshold = resolveBossThreshold(
             habits.filter((h) => !h.archived),
             weekStart,
             state.bossWeek,
             new Set(forgivenDates),
+            modifier,
+            ctx,
           );
           const bossWeek =
             state.bossWeek?.weekStart === weekStart && state.bossWeek.threshold === threshold
@@ -1206,14 +1210,27 @@ export const useStore = create<Store>()(
         // what you're paid for can't drift apart between decay checks. A
         // vacation shrinks the target; only a week you were away for entirely
         // drops it to zero, and then there is no boss to defeat.
+        // The modifier has to reach both sides or the target and the score
+        // stop meaning the same thing — the exact failure that once had the
+        // card showing 252 against a stored 180.
+        const { modifier, ctx } = getBossSetup(weekStart, state.character.attributes);
+        const active = state.habits.filter((h) => !h.archived);
         const threshold = resolveBossThreshold(
-          state.habits.filter((h) => !h.archived),
+          active,
           weekStart,
           state.bossWeek,
           getForgivenSet(state.character.cheatDay, state.vacations),
+          modifier,
+          ctx,
         );
         if (threshold <= 0) return;
-        const xpEarned = getWeeklyXpEarned(state.completions, weekStart);
+        const xpEarned = getWeeklyXpEarned(
+          state.completions,
+          weekStart,
+          indexHabits(state.habits),
+          modifier,
+          ctx,
+        );
         if (xpEarned < threshold) return;
 
         const boss = getBossForWeek(weekStart);

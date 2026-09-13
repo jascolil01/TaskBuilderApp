@@ -28,6 +28,28 @@ const PATTERNS: Record<HapticKind, number | number[]> = {
 
 let enabled = true;
 
+/**
+ * Browsers refuse to vibrate until the page has been interacted with, and
+ * Chromium logs a console error every time you ask before then. That matters
+ * here because a boss victory is claimed on load: opening the app to a week
+ * you had already cleared fired a buzz with no gesture behind it, and left an
+ * error in the console of anyone who looked.
+ *
+ * So the first real interaction arms it, which is the browser's own rule
+ * rather than a guess at it.
+ */
+let armed = false;
+
+if (typeof window !== 'undefined') {
+  const arm = () => {
+    armed = true;
+    window.removeEventListener('pointerdown', arm);
+    window.removeEventListener('keydown', arm);
+  };
+  window.addEventListener('pointerdown', arm, { once: true });
+  window.addEventListener('keydown', arm, { once: true });
+}
+
 /** Settings can silence these without every caller having to check. */
 export function setHapticsEnabled(value: boolean): void {
   enabled = value;
@@ -38,7 +60,7 @@ export function hapticsEnabled(): boolean {
 }
 
 export function haptic(kind: HapticKind): void {
-  if (!enabled) return;
+  if (!enabled || !armed) return;
   if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
   // Some webviews expose vibrate and then throw on call, and a failed buzz is
   // never worth breaking a completion over.
@@ -47,6 +69,14 @@ export function haptic(kind: HapticKind): void {
   } catch {
     // Ignored on purpose.
   }
+}
+
+/**
+ * Arms the gesture gate directly. Exists for tests, which have no DOM to
+ * dispatch a real pointer event into.
+ */
+export function armHapticsForTest(): void {
+  armed = true;
 }
 
 /**

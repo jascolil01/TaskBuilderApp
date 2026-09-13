@@ -10,6 +10,7 @@ import {
 } from '../lib/boss';
 import { parseDate, todayStr } from '../lib/date';
 import { getForgivenSet } from '../lib/forgiveness';
+import { getBossSetup, indexHabits } from '../lib/bossContext';
 import { BossMonster } from './BossMonster';
 import { XpBar } from './XpBar';
 
@@ -20,6 +21,7 @@ export function BossBattleCard() {
   const bossWeek = useStore((s) => s.bossWeek);
   const vacations = useStore((s) => s.vacations);
   const cheatDay = useStore((s) => s.character.cheatDay);
+  const attributes = useStore((s) => s.character.attributes);
 
   const today = todayStr();
   const weekStart = getWeekStart(today);
@@ -31,14 +33,24 @@ export function BossBattleCard() {
   // stops matching the bar you're judged against.
   const away = useMemo(() => getForgivenSet(cheatDay, vacations), [cheatDay, vacations]);
   const active = useMemo(() => habits.filter((h) => !h.archived), [habits]);
+  // Built through the shared helper so the card and the store cannot assemble
+  // the modifier differently — the bug that put 252 on screen against 180.
+  const { modifier, ctx } = useMemo(() => getBossSetup(weekStart, attributes), [weekStart, attributes]);
+  const byId = useMemo(() => indexHabits(habits), [habits]);
   const threshold = useMemo(
-    () => resolveBossThreshold(active, weekStart, bossWeek, away),
-    [bossWeek, weekStart, active, away],
+    () => resolveBossThreshold(active, weekStart, bossWeek, away, modifier, ctx),
+    [bossWeek, weekStart, active, away, modifier, ctx],
   );
   // Below 1 means a vacation covered every scheduled day this week.
-  const present = useMemo(() => getPresentFraction(active, weekStart, away), [active, weekStart, away]);
+  const present = useMemo(
+    () => getPresentFraction(active, weekStart, away, modifier, ctx),
+    [active, weekStart, away, modifier, ctx],
+  );
   const reducedBy = Math.round((1 - present) * 100);
-  const xpEarned = useMemo(() => getWeeklyXpEarned(completions, weekStart), [completions, weekStart]);
+  const xpEarned = useMemo(
+    () => getWeeklyXpEarned(completions, weekStart, byId, modifier, ctx),
+    [completions, weekStart, byId, modifier, ctx],
+  );
   const victory = bossVictories.find((v) => v.weekStart === weekStart);
   const pct = Math.min(100, Math.round((xpEarned / threshold) * 100));
   const daysLeft = Math.max(0, Math.round((parseDate(weekEnd).getTime() - parseDate(today).getTime()) / 86400000));
@@ -84,6 +96,9 @@ export function BossBattleCard() {
       </div>
       <p className="mt-1 text-right text-[11px] text-white/35">
         {Math.min(xpEarned, threshold)} / {threshold} quest XP this week
+      </p>
+      <p className="mt-2 rounded-lg border border-white/10 bg-ink-950/40 px-2.5 py-1.5 text-[11px] leading-relaxed text-white/45">
+        <span className="text-white/65">This week:</span> {boss.modifier.rule}
       </p>
       {reducedBy > 0 && (
         <p className="mt-0.5 text-right text-[11px] text-mana-400/70">
