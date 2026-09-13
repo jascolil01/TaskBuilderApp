@@ -1,5 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
+import { hapticsSupported } from '../lib/haptics';
+import { getBackupHealth } from '../lib/storage';
 import { todayStr } from '../lib/date';
 import {
   daysInclusive,
@@ -10,6 +12,10 @@ import {
 } from '../lib/vacation';
 
 export function Settings({ onClose }: { onClose: () => void }) {
+  const haptics = useStore((s) => s.settings.haptics ?? true);
+  const createdAt = useStore((s) => s.character.createdAt);
+  const lastBackupDate = useStore((s) => s.settings.lastBackupDate ?? null);
+  const backup = getBackupHealth(lastBackupDate, createdAt);
   const characterName = useStore((s) => s.character.name);
   const resetAll = useStore((s) => s.resetAll);
   const settings = useStore((s) => s.settings);
@@ -158,11 +164,42 @@ export function Settings({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
+        {hapticsSupported() && (
+          <div className="mt-4 rounded-xl border border-white/10 bg-ink-800/50 p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-display text-sm font-semibold text-gold-300">Vibration</h3>
+                <p className="mt-0.5 text-xs text-white/40">A short buzz when a quest lands, a level turns, or a boss falls</p>
+              </div>
+              <button
+                onClick={() => setReminderSettings({ haptics: !haptics })}
+                role="switch"
+                aria-checked={haptics}
+                aria-label="Vibration"
+                className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
+                  haptics ? 'bg-gold-500' : 'bg-white/15'
+                }`}
+              >
+                <span
+                  className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-all ${
+                    haptics ? 'left-6' : 'left-1'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="mt-4 rounded-xl border border-white/10 bg-ink-800/50 p-4">
           <h3 className="font-display text-sm font-semibold text-gold-300">Backup</h3>
           <p className="mt-1 text-xs text-white/40">
             Your data lives only on this device. Export a backup file to keep somewhere safe or move to a new phone.
           </p>
+          {backup.message && (
+            <p className="mt-2 rounded-lg border border-gold-500/35 bg-gold-500/10 px-3 py-2 text-[11px] leading-relaxed text-gold-300/90">
+              {backup.message}
+            </p>
+          )}
           <div className="mt-3 flex gap-2">
             <button
               onClick={handleExport}

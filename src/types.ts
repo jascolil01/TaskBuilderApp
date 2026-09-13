@@ -244,6 +244,15 @@ export interface ReminderSettings {
   enabled: boolean;
   time: string;
   lastNotifiedDate: string | null;
+  /**
+   * Device-level preferences and one-time acknowledgements. All optional, and
+   * all read with a default, so a save that predates them needs no migration.
+   */
+  haptics?: boolean;
+  /** Last export, so the app can notice the only copy is getting old. */
+  lastBackupDate?: string | null;
+  /** Set once the decay explainer has been shown, so it never repeats. */
+  decayExplained?: boolean;
 }
 
 export interface BossVictory {

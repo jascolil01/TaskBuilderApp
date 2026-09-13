@@ -63,6 +63,7 @@ import { type EffortTier, getEffortXp, inferEffort } from './lib/effort';
 import { clampTier, crossesTier, effectiveTier, getTierName, tierForStreak } from './lib/streak';
 import { type ClassId, getClassesForAttribute, getClassStanding, isClassId } from './lib/classes';
 import { resolveSecondary } from './lib/affinity';
+import { haptic } from './lib/haptics';
 import {
   clampProgress,
   getGoalStatus,
@@ -123,7 +124,8 @@ interface Store {
   setPreferredClass: (classId: ClassId | null) => void;
   startJourney: (name: string, templateIds: string[]) => void;
   spendCheatDay: () => void;
-  setReminderSettings: (patch: Partial<Pick<ReminderSettings, 'enabled' | 'time'>>) => void;
+  setReminderSettings: (patch: Partial<Pick<ReminderSettings, 'enabled' | 'time' | 'haptics'>>) => void;
+  markDecayExplained: () => void;
   markReminderNotified: (date: string) => void;
   runDecayCheck: () => void;
   addFromTemplates: (templateIds: string[]) => number;
@@ -314,6 +316,8 @@ export const useStore = create<Store>()(
       setReminderSettings: (patch) => set((state) => ({ settings: { ...state.settings, ...patch } })),
 
       markReminderNotified: (date) => set((state) => ({ settings: { ...state.settings, lastNotifiedDate: date } })),
+
+      markDecayExplained: () => set((state) => ({ settings: { ...state.settings, decayExplained: true } })),
 
       runDecayCheck: () =>
         set((state) => {
@@ -530,9 +534,13 @@ export const useStore = create<Store>()(
           },
         };
 
+        // The tap that matters most in the whole app, so it gets the tick.
+        haptic('tick');
+
         // Reaching a new rung is rare — four times in a quest's life — so it
         // gets its own toast rather than competing with the usual chain below.
         if (onSchedule && crossesTier(habit.bonusTier, newStreak)) {
+          haptic('tier');
           const pct = Math.round(award.streakBonus * 100);
           useToastStore
             .getState()
@@ -545,8 +553,10 @@ export const useStore = create<Store>()(
         if (crossedPerks.length > 0) {
           const perk = crossedPerks[crossedPerks.length - 1];
           const label = perk.signature ? '✨ Signature perk unlocked' : '🎉 Perk unlocked';
+          haptic('levelUp');
           useToastStore.getState().show(`${label}: ${perk.name} (${habit.attribute} Lv ${perk.level})`);
         } else if (newAttrState.level > oldLevel) {
+          haptic('levelUp');
           useToastStore.getState().show(`⭐ ${habit.attribute} leveled up to ${newAttrState.level}!`);
         } else if (award.doubled) {
           useToastStore.getState().show(`⚔️ Berserker! ${newStreak}-day streak paid double XP.`);
@@ -790,9 +800,11 @@ export const useStore = create<Store>()(
           useToastStore
             .getState()
             .show(`Can't undo — you've already spent the ${todaysEntry.goldAwarded} gold this quest earned.`);
+          haptic('refused');
           return;
         }
 
+        haptic('undo');
         const remaining = state.completions.filter((c) => c.id !== todaysEntry.id);
         const previous = [...remaining]
           .filter((c) => c.habitId === id)
@@ -1188,6 +1200,7 @@ export const useStore = create<Store>()(
           defeatedAt: new Date().toISOString(),
         };
 
+        haptic('victory');
         useToastStore.getState().show(`⚔️ ${boss.name} defeated! +${goldReward} gold`);
         set((s) => ({
           character: { ...s.character, gold: s.character.gold + goldReward },
@@ -1242,6 +1255,7 @@ export const useStore = create<Store>()(
             },
           ],
         }));
+        haptic('tick');
         useToastStore.getState().show(`🎯 Goal set: ${template.name}`);
       },
 
@@ -1267,10 +1281,12 @@ export const useStore = create<Store>()(
         if (finishing && expired) {
           // The deadline is the commitment. Landing the last unit after it has
           // passed still counts as done -- it just doesn't pay.
+          haptic('refused');
           useToastStore.getState().show('Finished, but past the deadline — no reward this time.');
         } else if (finishing) {
           const xp = GOAL_XP[goal.scale];
           const gold = GOAL_GOLD[goal.scale];
+          haptic('victory');
           useToastStore.getState().show(`🏆 ${goal.name} — complete! +${xp} ${goal.attribute}, +${gold} gold`);
         }
 
@@ -1346,6 +1362,9 @@ export const useStore = create<Store>()(
       exportData: () => {
         const { character, habits, completions, rewards, redemptions, bossVictories, bossWeek, vacations, goals, settings } =
           get();
+        // Recorded so the app can tell you when the only copy of all this is
+        // getting old. Set here rather than in the UI so every caller counts.
+        set((s) => ({ settings: { ...s.settings, lastBackupDate: todayStr() } }));
         return JSON.stringify(
           {
             version: SCHEMA_VERSION,

@@ -8,17 +8,35 @@ import { Chronicle } from './screens/Chronicle';
 import { Onboarding } from './screens/Onboarding';
 import { Toast } from './components/Toast';
 import { ReminderScheduler } from './components/ReminderScheduler';
+import { DecayNotice } from './components/DecayNotice';
+import { requestPersistentStorage } from './lib/storage';
+import { setHapticsEnabled } from './lib/haptics';
 
 function App() {
   const characterName = useStore((s) => s.character.name);
   const runDecayCheck = useStore((s) => s.runDecayCheck);
   const claimBossVictory = useStore((s) => s.claimBossVictory);
+  const haptics = useStore((s) => s.settings.haptics ?? true);
   const [screen, setScreen] = useState<Screen>('character');
   const [hydrated, setHydrated] = useState(() => useStore.persist.hasHydrated());
 
   useEffect(() => {
     return useStore.persist.onFinishHydration(() => setHydrated(true));
   }, []);
+
+  // Ask the browser not to evict us. Installed web apps are already exempt
+  // from WebKit's seven-day storage cap, but eviction under disk pressure is
+  // still possible and a browser tab gets no exemption at all. Deliberately
+  // not awaited: the answer changes nothing about startup.
+  useEffect(() => {
+    void requestPersistentStorage();
+  }, []);
+
+  // Mirrored into a module-level flag so the store can buzz without every
+  // action having to read settings first.
+  useEffect(() => {
+    setHapticsEnabled(haptics);
+  }, [haptics]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -53,6 +71,7 @@ function App() {
       {screen === 'chronicle' && <Chronicle />}
       <BottomNav screen={screen} onChange={setScreen} />
       <Toast />
+      <DecayNotice />
       <ReminderScheduler />
     </>
   );
