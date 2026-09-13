@@ -74,6 +74,7 @@ import {
   suggestedDeadline,
 } from './lib/goals';
 import { getBossSetup, indexHabits } from './lib/bossContext';
+import { isAwake, isHibernating, wake, wakeDate } from './lib/hibernate';
 import { getTemplate } from './lib/questCatalog';
 import { getForgivenDates, getForgivenSet } from './lib/forgiveness';
 import {
@@ -150,6 +151,8 @@ interface Store {
     patch: Partial<Pick<Habit, 'name' | 'attribute' | 'secondary' | 'frequency' | 'graceDays' | 'effort'>>,
   ) => void;
   archiveHabit: (id: string) => void;
+  hibernateHabit: (id: string, days: number) => void;
+  wakeHabit: (id: string) => void;
   deleteHabit: (id: string) => void;
   completeHabit: (id: string) => void;
   undoCompleteHabit: (id: string, date?: string) => void;
@@ -343,7 +346,14 @@ export const useStore = create<Store>()(
           let streakSaves = state.character.streakSaves;
           let changed = false;
 
-          const habits = state.habits.map((h) => {
+          const habits = state.habits.map((original) => {
+            // A quest whose wake date has passed is woken *before* the pass,
+            // so decay starts from today instead of walking back over every
+            // sleeping day and charging for all of them.
+            const justWoke = original.hibernatingUntil && !isHibernating(original, today);
+            const h = justWoke ? wake(original, today) : original;
+            if (isHibernating(h, today)) return h;
+
             // Perk bonuses are read from the pre-decay attributes so that one
             // habit's decay can't silently weaken another habit's grace
             // period in the middle of the same pass.
@@ -370,7 +380,7 @@ export const useStore = create<Store>()(
               attributes = { ...attributes, [h.attribute]: removeXp(attributes[h.attribute], xpLoss) };
               changed = true;
             }
-            if (updated !== h) changed = true;
+            if (updated !== original) changed = true;
             return updated;
           });
 
@@ -379,7 +389,8 @@ export const useStore = create<Store>()(
           const weekStart = getWeekStart(today);
           const { modifier, ctx } = getBossSetup(weekStart, baseAttributes);
           const threshold = resolveBossThreshold(
-            habits.filter((h) => !h.archived),
+            // A sleeping quest is not due, so it cannot raise the bar.
+            habits.filter((h) => isAwake(h, today)),
             weekStart,
             state.bossWeek,
             new Set(forgivenDates),
@@ -503,6 +514,30 @@ export const useStore = create<Store>()(
         set((state) => ({
           habits: state.habits.map((h) => (h.id === id ? { ...h, archived: true } : h)),
         })),
+
+      hibernateHabit: (id, days) => {
+        const habit = get().habits.find((h) => h.id === id);
+        if (!habit) return;
+        const until = wakeDate(days);
+        haptic('tick');
+        useToastStore
+          .getState()
+          .show(`😴 ${habit.name} is asleep until ${until}. Its streak is safe.`);
+        set((state) => ({
+          habits: state.habits.map((h) => (h.id === id ? { ...h, hibernatingUntil: until } : h)),
+        }));
+      },
+
+      wakeHabit: (id) => {
+        const today = todayStr();
+        const habit = get().habits.find((h) => h.id === id);
+        if (!habit) return;
+        haptic('tick');
+        useToastStore.getState().show(`${habit.name} is awake again.`);
+        set((state) => ({
+          habits: state.habits.map((h) => (h.id === id ? wake(h, today) : h)),
+        }));
+      },
 
       deleteHabit: (id) =>
         set((state) => ({
@@ -1214,7 +1249,7 @@ export const useStore = create<Store>()(
         // stop meaning the same thing — the exact failure that once had the
         // card showing 252 against a stored 180.
         const { modifier, ctx } = getBossSetup(weekStart, state.character.attributes);
-        const active = state.habits.filter((h) => !h.archived);
+        const active = state.habits.filter((h) => isAwake(h, today));
         const threshold = resolveBossThreshold(
           active,
           weekStart,

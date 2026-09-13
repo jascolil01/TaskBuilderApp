@@ -51,6 +51,14 @@ export interface Habit {
   missedSinceCompletion: number;
   /** Length of the most recently broken streak, so a Phoenix Feather can restore it. */
   lastBrokenStreak?: number;
+  /**
+   * A quest asleep until this date (exclusive). Distinct from `archived`,
+   * which is how a quest ends: hibernating keeps the streak, the bonus tier
+   * and the history exactly as they were, and the quest wakes on its own.
+   * For seasonal habits — outdoor running in February — where archiving
+   * throws away a streak you did nothing to deserve losing.
+   */
+  hibernatingUntil?: string | null;
   createdAt: string;
   archived: boolean;
 }

@@ -221,6 +221,11 @@ function parseHabit(raw: unknown): Habit | null {
     lastCompletedDate: nullableDate(raw.lastCompletedDate),
     decayedThroughDate: nullableDate(raw.decayedThroughDate),
     missedSinceCompletion: Math.max(0, Math.floor(finiteNum(raw.missedSinceCompletion, 0))),
+    // A sleeping quest stays asleep across a restore; a past date simply
+    // reads as awake, so no validation beyond the type is needed.
+    ...(typeof raw.hibernatingUntil === 'string' && raw.hibernatingUntil
+      ? { hibernatingUntil: raw.hibernatingUntil }
+      : {}),
     // Dropped by earlier versions of this parser, which quietly cost an
     // imported save its Phoenix Feather target.
     ...(raw.lastBrokenStreak === undefined

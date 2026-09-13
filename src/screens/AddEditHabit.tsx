@@ -10,12 +10,16 @@ import {
 import type { AttributeKey, Frequency, Habit } from '../types';
 import { ATTRIBUTE_INFO, ATTRIBUTE_KEYS } from '../lib/rpg';
 import { getAffinities, resolveSecondary, SECONDARY_SHARE } from '../lib/affinity';
+import { daysUntilWake, HIBERNATE_OPTIONS, isHibernating } from '../lib/hibernate';
 import { weekdayLabel } from '../lib/date';
 
 export function AddEditHabit({ habit, onClose }: { habit: Habit | null; onClose: () => void }) {
   const addHabit = useStore((s) => s.addHabit);
   const updateHabit = useStore((s) => s.updateHabit);
   const archiveHabit = useStore((s) => s.archiveHabit);
+  const hibernateHabit = useStore((s) => s.hibernateHabit);
+  const wakeHabit = useStore((s) => s.wakeHabit);
+  const [sleepOpen, setSleepOpen] = useState(false);
   const deleteHabit = useStore((s) => s.deleteHabit);
   const completions = useStore((s) => s.completions);
 
@@ -24,6 +28,7 @@ export function AddEditHabit({ habit, onClose }: { habit: Habit | null; onClose:
   const [secondary, setSecondary] = useState<AttributeKey | null>(habit?.secondary ?? null);
   // Changing the primary can strand the secondary, so the options are derived
   // and the selection is re-checked rather than left to go stale.
+  const asleep = habit ? isHibernating(habit) : false;
   const affinities = getAffinities(attribute);
   const validSecondary = resolveSecondary(attribute, secondary);
   const [isDaily, setIsDaily] = useState(habit ? habit.frequency.type === 'daily' : true);
@@ -219,6 +224,66 @@ export function AddEditHabit({ habit, onClose }: { habit: Habit | null; onClose:
             {habit ? 'Save changes' : 'Create quest'}
           </button>
         </div>
+
+        {habit && !habit.archived && (
+          <div className="mt-3 rounded-xl border border-white/10 bg-ink-800/40 p-3">
+            {asleep ? (
+              <>
+                <p className="text-[12px] text-white/60">
+                  😴 Asleep for another {daysUntilWake(habit)} day
+                  {daysUntilWake(habit) === 1 ? '' : 's'}. Its streak and bonus are waiting for it.
+                </p>
+                <button
+                  onClick={() => {
+                    wakeHabit(habit.id);
+                    onClose();
+                  }}
+                  className="mt-2 w-full rounded-lg border border-gold-500/50 py-2 text-xs text-gold-300"
+                >
+                  Wake it now
+                </button>
+              </>
+            ) : sleepOpen ? (
+              <>
+                <p className="text-[12px] text-white/60">How long should it sleep?</p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  {HIBERNATE_OPTIONS.map((o) => (
+                    <button
+                      key={o.days}
+                      onClick={() => {
+                        hibernateHabit(habit.id, o.days);
+                        onClose();
+                      }}
+                      className="rounded-lg border border-white/15 py-2 text-xs text-white/70"
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => setSleepOpen(false)}
+                  className="mt-2 w-full py-1 text-[11px] text-white/35"
+                >
+                  Never mind
+                </button>
+              </>
+            ) : (
+              <>
+                <h3 className="font-display text-xs font-semibold text-white/60">Out of season?</h3>
+                <p className="mt-1 text-[11px] leading-relaxed text-white/40">
+                  Put it to sleep instead of archiving. No decay, nothing due, and your streak is exactly where you
+                  left it when it wakes.
+                </p>
+                <button
+                  onClick={() => setSleepOpen(true)}
+                  className="mt-2 w-full rounded-lg border border-white/15 py-2 text-xs text-white/60"
+                >
+                  😴 Hibernate this quest
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
         {habit && (
           <div className="mt-3 flex gap-2">

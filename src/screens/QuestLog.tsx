@@ -10,6 +10,7 @@ import { AddEditHabit } from './AddEditHabit';
 import { QuestBrowser } from './QuestBrowser';
 import { Goals } from './Goals';
 import { CoachCard } from '../components/CoachCard';
+import { daysUntilWake, isAwake, isHibernating } from '../lib/hibernate';
 import { getGoalStatus } from '../lib/goals';
 
 export function QuestLog() {
@@ -17,7 +18,10 @@ export function QuestLog() {
   const [editing, setEditing] = useState<Habit | 'new' | null>(null);
   const [browsing, setBrowsing] = useState(false);
 
-  const active = habits.filter((h) => !h.archived);
+  // A sleeping quest is neither active nor archived: it gets its own section
+  // so it's visibly waiting rather than appearing to have been dropped.
+  const active = habits.filter((h) => isAwake(h));
+  const sleeping = habits.filter((h) => !h.archived && isHibernating(h));
   const archived = habits.filter((h) => h.archived);
   const today = todayStr();
   const cheatDay = useStore((s) => s.character.cheatDay);
@@ -147,6 +151,33 @@ export function QuestLog() {
             </div>
           )}
         </>
+      )}
+
+      {sleeping.length > 0 && (
+        <details className="mt-2 text-white/50">
+          <summary className="cursor-pointer text-sm">😴 Sleeping ({sleeping.length})</summary>
+          <div className="mt-2 flex flex-col gap-2.5">
+            {sleeping.map((h) => (
+              <div key={h.id} className="rounded-xl border border-white/10 bg-ink-800/30 p-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="min-w-0 flex-1 truncate text-sm text-white/70">{h.name}</span>
+                  <span className="shrink-0 text-[11px] text-white/35">
+                    wakes in {daysUntilWake(h)}d
+                  </span>
+                </div>
+                <p className="mt-1 text-[11px] text-white/35">
+                  🔥 {h.streak} day streak, held
+                </p>
+                <button
+                  onClick={() => setEditing(h)}
+                  className="mt-2 w-full rounded-lg border border-white/12 py-1.5 text-[11px] text-white/45"
+                >
+                  Wake it early
+                </button>
+              </div>
+            ))}
+          </div>
+        </details>
       )}
 
       {archived.length > 0 && (

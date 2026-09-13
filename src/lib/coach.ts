@@ -2,6 +2,7 @@ import type { CompletionEntry, Habit } from '../types';
 import { EFFORT_ORDER, EFFORT_TIERS, type EffortTier, inferEffort } from './effort';
 import { getQuestStats, RATE_WINDOW_DAYS, type QuestStat } from './stats';
 import { todayStr } from './date';
+import { isHibernating } from './hibernate';
 
 /**
  * Noticing when a quest isn't working, and offering the fix.
@@ -98,7 +99,8 @@ export function suggestFor(
   stat: QuestStat,
   completions: CompletionEntry[],
 ): Suggestion | null {
-  if (habit.archived) return null;
+  // A sleeping quest isn't failing, it's out of season.
+  if (habit.archived || isHibernating(habit)) return null;
   if (stat.rate === null || stat.due < MIN_OCCURRENCES) return null;
   if (stat.rate >= STRUGGLING_RATE) return null;
 

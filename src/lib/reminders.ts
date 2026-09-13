@@ -1,5 +1,6 @@
 import type { CheatDayState, Habit, Vacation } from '../types';
 import { isScheduledDay } from './rpg';
+import { isAwake } from './hibernate';
 import { todayStr } from './date';
 import { isRestDay } from './forgiveness';
 
@@ -15,7 +16,7 @@ export function getIncompleteTodayCount(
   // what the quest list itself wants.
   if (cheatDay && isRestDay(cheatDay, vacations, today)) return 0;
   return habits.filter(
-    (h) => !h.archived && isScheduledDay(h, today) && h.lastCompletedDate !== today,
+    (h) => isAwake(h, today) && isScheduledDay(h, today) && h.lastCompletedDate !== today,
   ).length;
 }
 
