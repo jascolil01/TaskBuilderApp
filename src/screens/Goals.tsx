@@ -10,6 +10,9 @@ import {
   getGoalPace,
   paceLabel,
 } from '../lib/goals';
+import { getTemplate } from '../lib/questCatalog';
+import { countFor, getLinks, manualProgress } from '../lib/goalLinks';
+import { isAwake } from '../lib/hibernate';
 import { todayStr } from '../lib/date';
 
 /**
@@ -23,7 +26,15 @@ export function Goals({ onClose }: { onClose: () => void }) {
   const setGoalProgress = useStore((s) => s.setGoalProgress);
   const deleteGoal = useStore((s) => s.deleteGoal);
   const addGoalFromTemplate = useStore((s) => s.addGoalFromTemplate);
+  const linkGoalHabit = useStore((s) => s.linkGoalHabit);
+  const unlinkGoalHabit = useStore((s) => s.unlinkGoalHabit);
+  const addFromTemplates = useStore((s) => s.addFromTemplates);
+  const habits = useStore((s) => s.habits);
+  const completions = useStore((s) => s.completions);
   const today = todayStr();
+  // Which goal's quest picker is open. One at a time: the sheet is already a
+  // scroll, and six open pickers is a wall.
+  const [linking, setLinking] = useState<string | null>(null);
 
   const [browsing, setBrowsing] = useState(goals.length === 0);
   const [filter, setFilter] = useState<AttributeKey | 'all'>('all');
@@ -105,6 +116,37 @@ export function Goals({ onClose }: { onClose: () => void }) {
                       </span>
                     </div>
                     <p className="mt-1 text-[11px] text-white/40">{t.note}</p>
+                    {/* What taking it on actually does. A goal that arrives
+                        with its own mechanism is worth saying out loud. */}
+                    {t.quests.length > 0 && (
+                      <p className="mt-1.5 text-[11px] leading-relaxed text-mana-300/70">
+                        🔗 Counts up when you complete{' '}
+                        {t.quests
+                          .map((id) => getTemplate(id)?.name)
+                          .filter(Boolean)
+                          .join(' or ')}
+                        {/* Not simply "added for you": a quest you already
+                            keep is reused rather than duplicated. */}
+                        {already ? '' : " — added for you if you don't keep it already"}
+                      </p>
+                    )}
+                    {t.companions.length > 0 && (
+                      <p className="mt-1 text-[11px] leading-relaxed text-white/30">
+                        Helps to have:{' '}
+                        {t.companions
+                          .map((id) => getTemplate(id)?.name)
+                          .filter(Boolean)
+                          .join(', ')}
+                        {already && (
+                          <button
+                            onClick={() => addFromTemplates(t.companions)}
+                            className="ml-1.5 text-mana-300/80 underline"
+                          >
+                            add these
+                          </button>
+                        )}
+                      </p>
+                    )}
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <span className="text-[11px] text-white/35">
                         {t.target} {t.unit} · {t.days} days · {GOAL_SCALE_LABEL[t.scale]}
@@ -140,6 +182,13 @@ export function Goals({ onClose }: { onClose: () => void }) {
               const info = ATTRIBUTE_INFO[goal.attribute];
               const done = pace.status === 'complete';
               const expired = pace.status === 'expired';
+              const links = getLinks(goal);
+              const byHand = manualProgress(goal);
+              // A sleeping or archived quest is not offered: linking something
+              // that cannot be completed would add a row that never moves.
+              const linkable = habits.filter(
+                (h) => isAwake(h, today) && !links.some((l) => l.habitId === h.id),
+              );
               return (
                 <div
                   key={goal.id}
@@ -191,6 +240,46 @@ export function Goals({ onClose }: { onClose: () => void }) {
                     </span>
                   </div>
 
+                  {/* Where the number came from. A bar that moves on its own
+                      needs to say what moved it, or it reads as a glitch. */}
+                  {links.length > 0 && (
+                    <div className="mt-2 flex flex-col gap-1">
+                      {links.map((link) => {
+                        const fed = habits.find((h) => h.id === link.habitId);
+                        const n = countFor(goal, link.habitId, completions);
+                        return (
+                          <div key={link.habitId} className="flex items-baseline gap-1.5 text-[11px]">
+                            <span className="text-mana-300/80">🔗</span>
+                            <span className="min-w-0 flex-1 truncate text-white/45">
+                              {fed?.name ?? 'a deleted quest'}
+                            </span>
+                            <span className="shrink-0 tabular-nums text-white/35">
+                              {n} {goal.unit}
+                            </span>
+                            {!done && (
+                              <button
+                                onClick={() => unlinkGoalHabit(goal.id, link.habitId)}
+                                aria-label={`Stop counting ${fed?.name ?? 'this quest'}`}
+                                className="shrink-0 px-1 text-white/25"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {byHand > 0 && (
+                        <div className="flex items-baseline gap-1.5 text-[11px]">
+                          <span className="text-white/25">✎</span>
+                          <span className="min-w-0 flex-1 text-white/35">added by hand</span>
+                          <span className="shrink-0 tabular-nums text-white/35">
+                            {byHand} {goal.unit}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Still tickable past the deadline: finishing late is
                       still finishing, it just doesn't pay. Hiding the control
                       would make that outcome unreachable. */}
@@ -198,7 +287,7 @@ export function Goals({ onClose }: { onClose: () => void }) {
                     <div className="mt-2.5 flex gap-2">
                       <button
                         onClick={() => setGoalProgress(goal.id, goal.progress - 1)}
-                        disabled={goal.progress === 0}
+                        disabled={byHand === 0}
                         aria-label={`Remove one from ${goal.name}`}
                         className="w-12 rounded-lg border border-white/12 py-1.5 text-sm text-white/40 disabled:opacity-30 active:scale-95"
                       >
@@ -214,6 +303,52 @@ export function Goals({ onClose }: { onClose: () => void }) {
                         Log one
                       </button>
                     </div>
+                  )}
+
+                  {/* Hooking a quest up is offered on every unfinished goal,
+                      because the quest you want to count is usually one you
+                      already keep rather than one a preset guessed. */}
+                  {!done && (
+                    linking === goal.id ? (
+                      <div className="mt-2 rounded-lg border border-mana-500/30 bg-mana-500/[0.06] p-2">
+                        <p className="text-[11px] text-white/50">
+                          Which quest counts as one {goal.unit.replace(/s$/, '')}?
+                        </p>
+                        <div className="mt-1.5 flex flex-col gap-1">
+                          {linkable.length === 0 ? (
+                            <p className="text-[11px] text-white/30">
+                              Every quest you have is already counting toward this one.
+                            </p>
+                          ) : (
+                            linkable.map((h) => (
+                              <button
+                                key={h.id}
+                                onClick={() => {
+                                  linkGoalHabit(goal.id, h.id);
+                                  setLinking(null);
+                                }}
+                                className="rounded-lg border border-white/12 px-2.5 py-1.5 text-left text-[11px] text-white/65 active:scale-[0.99]"
+                              >
+                                {h.name}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                        <button
+                          onClick={() => setLinking(null)}
+                          className="mt-1.5 w-full py-1 text-[10px] text-white/30"
+                        >
+                          Never mind
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setLinking(goal.id)}
+                        className="mt-2 w-full rounded-lg border border-mana-500/30 py-1.5 text-[11px] text-mana-300/80 active:scale-[0.99]"
+                      >
+                        🔗 {links.length > 0 ? 'Count another quest' : 'Let a quest count for this'}
+                      </button>
+                    )
                   )}
 
                   {confirmDelete === goal.id ? (

@@ -66,7 +66,6 @@ import { resolveSecondary } from './lib/affinity';
 import { haptic } from './lib/haptics';
 import { type Suggestion, snoozeUntil } from './lib/coach';
 import {
-  clampProgress,
   getGoalStatus,
   getGoalTemplate,
   GOAL_GOLD,
@@ -74,6 +73,14 @@ import {
   suggestedDeadline,
 } from './lib/goals';
 import { getBossSetup, indexHabits } from './lib/bossContext';
+import {
+  foldLinkIntoManual,
+  goalProgress,
+  isLinked,
+  manualHeadroom,
+  manualProgress,
+  settleGoals,
+} from './lib/goalLinks';
 import { isAwake, isHibernating, wake, wakeDate } from './lib/hibernate';
 import { initialRemindedDate, isValidTime } from './lib/questReminders';
 import { currentTimeHHMM } from './lib/reminders';
@@ -188,6 +195,9 @@ interface Store {
   }) => void;
   addGoalFromTemplate: (templateId: string) => void;
   setGoalProgress: (id: string, next: number) => void;
+  linkGoalHabit: (goalId: string, habitId: string) => void;
+  unlinkGoalHabit: (goalId: string, habitId: string) => void;
+  settleLinkedGoals: () => void;
   deleteGoal: (id: string) => void;
 
   applySuggestion: (s: Suggestion) => void;
@@ -257,6 +267,30 @@ function advanceCheatDayRecharge(character: CharacterState): CharacterState {
   }
   useToastStore.getState().show('🍰 Cheat Day recharged — you have a rest day banked.');
   return { ...character, cheatDay: { ...cheatDay, charges: 1, progressToNext: 0 } };
+}
+
+/**
+ * A finished goal's payout, applied in one place.
+ *
+ * A goal can now be finished two ways — the by-hand counter or the last
+ * completion of a linked quest — and two implementations of "what a goal is
+ * worth" would eventually disagree, which with real XP and gold is the kind of
+ * bug you only notice from the wrong total months later.
+ */
+function payGoal(character: CharacterState, goal: Goal): CharacterState {
+  const xp = GOAL_XP[goal.scale];
+  return {
+    ...character,
+    attributes: {
+      ...character.attributes,
+      [goal.attribute]: addXp(character.attributes[goal.attribute], xp),
+    },
+    gold: character.gold + GOAL_GOLD[goal.scale],
+    // Real XP, so it lifts the character level. It is deliberately absent from
+    // the completion log, which is what keeps the weekly boss and the
+    // per-quest stats from ever seeing it.
+    lifetimeXp: character.lifetimeXp + xp,
+  };
 }
 
 /**
@@ -570,6 +604,11 @@ export const useStore = create<Store>()(
         set((state) => ({
           habits: state.habits.filter((h) => h.id !== id),
           completions: state.completions.filter((c) => c.habitId !== id),
+          // Deleting a quest deletes its completions, so a goal deriving 60 of
+          // 100 sessions from it would silently collapse to nothing. The count
+          // is folded into the goal's by-hand figure first: deleting the quest
+          // you tracked something with is not a claim you never did it.
+          goals: state.goals.map((g) => foldLinkIntoManual(g, id, state.completions)),
         })),
 
       completeHabit: (id) => {
@@ -708,6 +747,8 @@ export const useStore = create<Store>()(
         });
 
         get().claimBossVictory();
+        // A completion can be the last session a goal was waiting for.
+        get().settleLinkedGoals();
       },
 
       /**
@@ -852,6 +893,8 @@ export const useStore = create<Store>()(
         // The completion landed on yesterday, which may belong to last week.
         const backfilledWeek = getWeekStart(yesterday);
         if (backfilledWeek !== getWeekStart(today)) get().claimBossVictory(backfilledWeek);
+        // A backfilled session counts toward a goal exactly as a live one does.
+        get().settleLinkedGoals();
       },
 
       /**
@@ -955,6 +998,11 @@ export const useStore = create<Store>()(
             completions: remaining,
           };
         });
+
+        // The completion is gone, so anything deriving from it must come back
+        // down. A goal already reached keeps its `completedOn` — the reward is
+        // not clawed back, the same as ticking a goal down by hand.
+        get().settleLinkedGoals();
       },
 
       /**
@@ -1334,6 +1382,18 @@ export const useStore = create<Store>()(
           ],
         })),
 
+      /**
+       * Takes on a preset goal, together with the quests that get you there.
+       *
+       * A goal on its own is an intention with no mechanism. The preset knows
+       * which quests are one unit of it, so those are added (or reused, if you
+       * already keep them) and linked, and from then on doing the thing is the
+       * only step: ticking the quest counts the goal up.
+       *
+       * Companion quests are deliberately left alone. Ten pages a day is how
+       * you read twelve books but it is not twelve books, and a link that
+       * counted it would have the goal claiming victory in twelve days.
+       */
       addGoalFromTemplate: (templateId) => {
         const template = getGoalTemplate(templateId);
         if (!template) return;
@@ -1345,16 +1405,18 @@ export const useStore = create<Store>()(
           return;
         }
         const today = todayStr();
+        const goalId = makeId();
         set((s) => ({
           goals: [
             ...s.goals,
             {
-              id: makeId(),
+              id: goalId,
               name: template.name,
               attribute: template.attribute,
               target: template.target,
               unit: template.unit,
               progress: 0,
+              manualProgress: 0,
               scale: template.scale,
               startedOn: today,
               deadline: suggestedDeadline(template, today),
@@ -1362,12 +1424,44 @@ export const useStore = create<Store>()(
             },
           ],
         }));
+
+        // Adds any that are missing; one you already keep is reused rather
+        // than duplicated, so taking on a goal never gives you two "Go to the
+        // gym"s.
+        get().addFromTemplates(template.quests);
+        const wanted = new Set(
+          template.quests
+            .map((id) => getTemplate(id)?.name.trim().toLowerCase())
+            .filter((n): n is string => Boolean(n)),
+        );
+        const linked = get().habits.filter((h) => wanted.has(h.name.trim().toLowerCase()));
+        if (linked.length > 0) {
+          set((s) => ({
+            goals: s.goals.map((g) =>
+              g.id === goalId
+                ? { ...g, links: linked.map((h) => ({ habitId: h.id, since: today })) }
+                : g,
+            ),
+          }));
+        }
+
         haptic('tick');
-        useToastStore.getState().show(`🎯 Goal set: ${template.name}`);
+        useToastStore
+          .getState()
+          .show(
+            linked.length > 0
+              ? `🎯 ${template.name} — ${linked.map((h) => h.name).join(' and ')} now counts toward it.`
+              : `🎯 Goal set: ${template.name}`,
+          );
       },
 
       /**
-       * Moves a goal's counter, and pays out the moment it reaches its target.
+       * Moves the part of a goal you keep by hand.
+       *
+       * With a quest linked, the total is that count plus this figure, so the
+       * by-hand control adjusts only its own half and is capped at whatever the
+       * quests have left unclaimed. Otherwise entering 50 on a goal already at
+       * 60 from the gym would silently throw away ten sessions you did.
        *
        * `completedOn` is the guard against paying twice: ticking to the target,
        * back down, and up again is a legitimate correction, not a second
@@ -1378,10 +1472,14 @@ export const useStore = create<Store>()(
         const state = get();
         const goal = state.goals.find((g) => g.id === id);
         if (!goal) return;
-        const progress = clampProgress(goal, next);
-        if (progress === goal.progress) return;
+
+        const headroom = manualHeadroom(goal, state.completions);
+        const manual = Math.max(0, Math.min(headroom, Math.floor(next - (goal.progress - manualProgress(goal)))));
+        if (manual === manualProgress(goal)) return;
 
         const today = todayStr();
+        const candidate = { ...goal, manualProgress: manual };
+        const progress = goalProgress(candidate, state.completions);
         const finishing = progress >= goal.target && !goal.completedOn;
         const expired = getGoalStatus(goal, today) === 'expired';
 
@@ -1400,28 +1498,91 @@ export const useStore = create<Store>()(
         set((s) => {
           const goals = s.goals.map((g) =>
             g.id === id
-              ? { ...g, progress, ...(finishing ? { completedOn: today } : {}) }
+              ? { ...g, manualProgress: manual, progress, ...(finishing ? { completedOn: today } : {}) }
               : g,
           );
           if (!finishing || expired) return { goals };
+          return { goals, character: payGoal(s.character, goal) };
+        });
+      },
 
-          const xp = GOAL_XP[goal.scale];
-          const attributes: Attributes = {
-            ...s.character.attributes,
-            [goal.attribute]: addXp(s.character.attributes[goal.attribute], xp),
-          };
-          return {
-            goals,
-            character: {
-              ...s.character,
-              attributes,
-              gold: s.character.gold + GOAL_GOLD[goal.scale],
-              // Real XP, so it lifts the character level. It is deliberately
-              // absent from the completion log, which is what keeps the weekly
-              // boss and the per-quest stats from ever seeing it.
-              lifetimeXp: s.character.lifetimeXp + xp,
-            },
-          };
+      /**
+       * Points a quest at a goal, so completing it counts.
+       *
+       * The link starts from today rather than from the goal's start date:
+       * counting the past would double whatever you had already entered by
+       * hand for those same sessions, and a number that jumps the moment you
+       * connect two things is a number nobody trusts again.
+       */
+      linkGoalHabit: (goalId, habitId) => {
+        const state = get();
+        const goal = state.goals.find((g) => g.id === goalId);
+        const habit = state.habits.find((h) => h.id === habitId);
+        if (!goal || !habit || isLinked(goal, habitId)) return;
+
+        const today = todayStr();
+        set((s) => ({
+          goals: s.goals.map((g) =>
+            g.id === goalId ? { ...g, links: [...(g.links ?? []), { habitId, since: today }] } : g,
+          ),
+        }));
+        haptic('tick');
+        useToastStore.getState().show(`🔗 ${habit.name} now counts toward ${goal.name}.`);
+        get().settleLinkedGoals();
+      },
+
+      /**
+       * Unhooks a quest, keeping what it earned.
+       *
+       * The sessions are folded into the by-hand figure rather than dropped,
+       * because unlinking is a change to how a goal is tracked and not a claim
+       * that the work never happened.
+       */
+      unlinkGoalHabit: (goalId, habitId) => {
+        const state = get();
+        const goal = state.goals.find((g) => g.id === goalId);
+        if (!goal || !isLinked(goal, habitId)) return;
+        set((s) => ({
+          goals: s.goals.map((g) => (g.id === goalId ? foldLinkIntoManual(g, habitId, s.completions) : g)),
+        }));
+        get().settleLinkedGoals();
+      },
+
+      /**
+       * Recomputes every goal from the completion log and pays out any that
+       * have just arrived.
+       *
+       * Called after anything that can move a linked quest rather than each of
+       * those working out the consequences for itself, so there is exactly one
+       * implementation of what a goal's number means.
+       */
+      settleLinkedGoals: () => {
+        const state = get();
+        const today = todayStr();
+        const settled = settleGoals(state.goals, state.completions, today);
+        if (!settled.changed) return;
+
+        for (const goal of settled.finishedLate) {
+          useToastStore
+            .getState()
+            .show(`${goal.name} — finished, but past the deadline. No reward this time.`);
+        }
+        for (const goal of settled.finished) {
+          haptic('victory');
+          useToastStore
+            .getState()
+            .show(
+              `🏆 ${goal.name} — complete! +${GOAL_XP[goal.scale]} ${goal.attribute}, +${GOAL_GOLD[goal.scale]} gold`,
+            );
+        }
+
+        set((s) => {
+          // Settled against the state read above; the goals themselves are
+          // replaced wholesale, so a completion landing in between would be
+          // picked up by that write's own settle call rather than lost here.
+          let character = s.character;
+          for (const goal of settled.finished) character = payGoal(character, goal);
+          return { goals: settled.goals, character };
         });
       },
 

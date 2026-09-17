@@ -1,6 +1,7 @@
 import type { AttributeKey, Goal } from '../types';
 import { addDays, daysBetween, todayStr } from './date';
 import { getEffortXp } from './effort';
+import { getTemplate } from './questCatalog';
 
 /**
  * Long-term goals: the thing a habit can't express.
@@ -123,6 +124,22 @@ export interface GoalTemplate {
   /** How many days the preset suggests, from the day you start it. */
   days: number;
   note: string;
+  /**
+   * Quest templates that get you there, by id. Taking on the goal offers
+   * these already linked to it, so completing one counts toward the goal
+   * instead of leaving you to remember to tick both.
+   *
+   * Every id is checked against the quest catalog by the audit, so a preset
+   * can never point at a quest that does not exist.
+   */
+  quests: string[];
+  /**
+   * Quests that get you there but are not one unit of it — ten pages a day is
+   * how you read twelve books, but it is not twelve books. Offered alongside,
+   * and deliberately *not* linked: a link that counted these would have the
+   * goal claiming twelve books after twelve days.
+   */
+  companions: string[];
 }
 
 const YEAR = 365;
@@ -138,8 +155,10 @@ function g(
   scale: Goal['scale'],
   days: number,
   note: string,
+  quests: string[] = [],
+  companions: string[] = [],
 ): GoalTemplate {
-  return { id, name, attribute, target, unit, scale, days, note };
+  return { id, name, attribute, target, unit, scale, days, note, quests, companions };
 }
 
 /**
@@ -151,63 +170,87 @@ function g(
 export const GOAL_TEMPLATES: GoalTemplate[] = [
   // Strength
   g('goal-str-5k', 'Run a 5k without stopping', 'STR', 12, 'runs', 'serious', QUARTER,
-    'Twelve runs is roughly a couch-to-5k. The goal is the distance; the runs are how you get there.'),
+    'Twelve runs is roughly a couch-to-5k. The goal is the distance; the runs are how you get there.',
+    ['str-cardio'], ['str-walk', 'str-stretch']),
   g('goal-str-gym-100', '100 gym sessions', 'STR', 100, 'sessions', 'major', YEAR,
-    'Twice a week for a year. The number is big; the week is not.'),
+    'Twice a week for a year. The number is big; the week is not.',
+    ['str-gym', 'str-long-session'], ['str-stretch']),
   g('goal-str-pullup', 'Ten unbroken pull-ups', 'STR', 30, 'sessions', 'serious', QUARTER,
-    'Thirty focused sessions gets most people there from almost nothing.'),
+    'Thirty focused sessions gets most people there from almost nothing.',
+    ['str-pushups', 'str-gym'], ['str-stretch']),
   g('goal-str-walk-month', 'Walk every day for a month', 'STR', 30, 'days', 'modest', MONTH,
-    'The easiest one here, and the one most likely to still be going in a year.'),
+    'The easiest one here, and the one most likely to still be going in a year.',
+    ['str-walk'], ['str-stairs']),
 
   // Dexterity
   g('goal-dex-song', 'Learn a piece end to end', 'DEX', 40, 'practices', 'serious', QUARTER,
-    'Forty sittings with one piece beats four hundred with forty.'),
+    'Forty sittings with one piece beats four hundred with forty.',
+    ['dex-instrument'], ['dex-deliberate', 'dex-drill']),
   g('goal-dex-sketchbook', 'Fill a sketchbook', 'DEX', 60, 'pages', 'serious', QUARTER,
-    'Pages, not masterpieces. The bad ones count.'),
+    'Pages, not masterpieces. The bad ones count.',
+    ['dex-sketch'], ['dex-drill']),
   g('goal-dex-recipes', 'Cook 25 new recipes', 'DEX', 25, 'recipes', 'modest', QUARTER,
-    'Two a week. You have to eat anyway.'),
+    'Two a week. You have to eat anyway.',
+    ['dex-cook-new'], ['con-cook']),
   g('goal-dex-craft', 'Finish the project you started', 'DEX', 20, 'sessions', 'modest', MONTH,
-    'Whatever is sitting half-done. Twenty sessions and it is out of your head.'),
+    'Whatever is sitting half-done. Twenty sessions and it is out of your head.',
+    ['dex-craft'], ['dex-deliberate']),
 
   // Constitution
   g('goal-con-sleep', 'Sleep by midnight for 60 nights', 'CON', 60, 'nights', 'serious', QUARTER,
-    'Not perfect, just sixty. The cumulative effect is the point.'),
+    'Not perfect, just sixty. The cumulative effect is the point.',
+    ['con-lights-out'], ['con-no-screens']),
   g('goal-con-dry', 'A dry month', 'CON', 30, 'days', 'modest', MONTH,
-    'Thirty days, tracked. Most people find the second half easier.'),
+    'Thirty days, tracked. Most people find the second half easier.',
+    ['con-dry'], ['con-water']),
   g('goal-con-cook', 'Cook at home 100 times', 'CON', 100, 'meals', 'major', YEAR,
-    'Cheaper, better, and it compounds into a skill.'),
+    'Cheaper, better, and it compounds into a skill.',
+    ['con-cook'], ['con-prep-lunch']),
   g('goal-con-water', 'Hit your water target for 90 days', 'CON', 90, 'days', 'serious', QUARTER,
-    'The least glamorous entry on this list and one of the most effective.'),
+    'The least glamorous entry on this list and one of the most effective.',
+    ['con-water'], ['con-breakfast']),
 
   // Intelligence
   g('goal-int-books', 'Read 12 books', 'INT', 12, 'books', 'major', YEAR,
-    'One a month. Roughly fifteen pages a day.'),
+    'One a month. Roughly fifteen pages a day.',
+    [], ['int-read', 'int-long-read']),
   g('goal-int-course', 'Finish the course', 'INT', 30, 'lessons', 'serious', QUARTER,
-    'The one you bought and did four lessons of. This is that one.'),
+    'The one you bought and did four lessons of. This is that one.',
+    ['int-study'], ['int-deep-work']),
   g('goal-int-language', '100 days of a language', 'INT', 100, 'days', 'major', YEAR,
-    'A hundred real days beats a thousand-day streak of ten-second sessions.'),
+    'A hundred real days beats a thousand-day streak of ten-second sessions.',
+    ['int-language'], ['int-flashcards']),
   g('goal-int-write', 'Write 20,000 words', 'INT', 20, 'thousand words', 'serious', QUARTER,
-    'A short book, or a very long start on a long one.'),
+    'A short book, or a very long start on a long one.',
+    [], ['int-write', 'int-deep-work']),
 
   // Wisdom
   g('goal-wis-meditate', 'Meditate 60 times', 'WIS', 60, 'sessions', 'serious', QUARTER,
-    'Sixty sittings is where most people stop having to force it.'),
+    'Sixty sittings is where most people stop having to force it.',
+    ['wis-meditate'], ['wis-quiet']),
   g('goal-wis-journal', 'Journal for 90 days', 'WIS', 90, 'entries', 'serious', QUARTER,
-    'Three months of entries is a record of a version of you that will be gone.'),
+    'Three months of entries is a record of a version of you that will be gone.',
+    ['wis-journal'], ['wis-plan']),
   g('goal-wis-review', '52 weekly reviews', 'WIS', 52, 'reviews', 'major', YEAR,
-    'One a week for a year. The only habit here that improves all the others.'),
+    'One a week for a year. The only habit here that improves all the others.',
+    ['wis-review'], ['wis-plan']),
   g('goal-wis-digital', 'Twelve screen-free days', 'WIS', 12, 'days', 'modest', QUARTER,
-    'One a week for a season. Harder than it sounds and worth more than it looks.'),
+    'One a week for a season. Harder than it sounds and worth more than it looks.',
+    ['wis-screen-free'], ['con-no-screens']),
 
   // Charisma
   g('goal-cha-reconnect', 'Reconnect with 12 people', 'CHA', 12, 'people', 'serious', QUARTER,
-    'One a week. The message you keep not sending.'),
+    'One a week. The message you keep not sending.',
+    ['cha-message'], ['cha-call']),
   g('goal-cha-host', 'Host six times', 'CHA', 6, 'gatherings', 'serious', QUARTER,
-    'Dinner, drinks, a walk. Hosting is a skill and it decays without use.'),
+    'Dinner, drinks, a walk. Hosting is a skill and it decays without use.',
+    ['cha-cook-for'], ['cha-plans']),
   g('goal-cha-talks', 'Speak in public five times', 'CHA', 5, 'talks', 'major', YEAR,
-    'Meetings count. Toasts count. The fifth is enormously easier than the first.'),
+    'Meetings count. Toasts count. The fifth is enormously easier than the first.',
+    [], ['cha-practise-talk', 'cha-share']),
   g('goal-cha-calls', 'Fifty proper conversations', 'CHA', 50, 'calls', 'major', YEAR,
-    'Not texts. Calls, or in person, long enough to actually get somewhere.'),
+    'Not texts. Calls, or in person, long enough to actually get somewhere.',
+    ['cha-call'], ['cha-message']),
 ];
 
 const BY_ID = new Map(GOAL_TEMPLATES.map((t) => [t.id, t]));
@@ -237,6 +280,24 @@ export function auditGoalCatalog(): string[] {
     // expires, which is worse than not offering it.
     if (t.target > t.days) problems.push(`${t.id}: ${t.target} in ${t.days} days is impossible`);
     if (!t.unit.trim()) problems.push(`${t.id}: no unit`);
+    // A preset pointing at a quest that does not exist would offer a button
+    // that silently does nothing, so the catalogs are checked against each
+    // other rather than kept in step by hand.
+    for (const questId of [...t.quests, ...t.companions]) {
+      if (!getTemplate(questId)) problems.push(`${t.id}: unknown quest ${questId}`);
+    }
+    for (const questId of t.quests) {
+      if (t.companions.includes(questId)) {
+        problems.push(`${t.id}: ${questId} is both counted and a companion`);
+      }
+    }
+    // A goal whose quests could finish it faster than its own deadline allows
+    // is not a goal, it is a formality. This catches a unit mismatch — one
+    // "read 10 pages" counted as one of twelve books — which is the whole
+    // reason companions exist.
+    if (t.quests.length > 0 && t.target < t.quests.length) {
+      problems.push(`${t.id}: ${t.quests.length} counted quests for a target of ${t.target}`);
+    }
   }
   return problems;
 }

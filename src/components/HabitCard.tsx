@@ -12,6 +12,7 @@ import {
   tierForStreak,
 } from '../lib/streak';
 import { getSecondaryXp, resolveSecondary } from '../lib/affinity';
+import { goalsFedBy } from '../lib/goalLinks';
 import { addDays, todayStr, weekdayLabel } from '../lib/date';
 
 export function HabitCard({
@@ -27,6 +28,7 @@ export function HabitCard({
   const undoCompleteHabit = useStore((s) => s.undoCompleteHabit);
   const backfillYesterday = useStore((s) => s.backfillYesterday);
   const completions = useStore((s) => s.completions);
+  const goals = useStore((s) => s.goals);
   const setCompletionNote = useStore((s) => s.setCompletionNote);
   const [noteOpen, setNoteOpen] = useState(false);
   const info = ATTRIBUTE_INFO[habit.attribute];
@@ -66,6 +68,11 @@ export function HabitCard({
     !yesterdayEntry;
   // A backfill used to be permanent; it can be taken back the same way.
   const undoBackfill = yesterdayEntry?.backfilled === true;
+
+  // The other half of the link, shown here so the quest says what it is for.
+  // Ticking something and watching a number move somewhere you can't see is
+  // how a connection stops feeling real.
+  const feeds = goalsFedBy(goals, habit.id);
 
   const scheduleLabel =
     habit.frequency.type === 'daily'
@@ -115,6 +122,11 @@ export function HabitCard({
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-white/40">
             <span>{scheduleLabel}</span>
             {habit.reminderTime && <span className="text-white/35">⏰ {habit.reminderTime}</span>}
+            {feeds.map((goal) => (
+              <span key={goal.id} className="text-mana-300/80">
+                🔗 {goal.name} {goal.progress}/{goal.target}
+              </span>
+            ))}
             {offSchedule && <span className="text-white/35">no streak credit</span>}
             {habit.streak > 0 && <span className="text-gold-400/90">🔥 {habit.streak} day streak</span>}
             {tier > 0 && (

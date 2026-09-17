@@ -202,7 +202,20 @@ export interface Goal {
   /** How many, and of what — "12" and "books". The unit is a label only. */
   target: number;
   unit: string;
+  /**
+   * The total shown, and what completion is judged on. Derived: it is always
+   * `manualProgress` plus what the linked quests have logged, recomputed
+   * rather than incremented so it can never drift from the history.
+   */
   progress: number;
+  /**
+   * The part you entered by hand, as opposed to the part your quests earned.
+   * Absent on goals made before quests could feed them, where `progress` is
+   * entirely manual and is read as such.
+   */
+  manualProgress?: number;
+  /** Quests that count toward this goal when completed. */
+  links?: { habitId: string; since: string }[];
   /** Sets the payout. Not derived from `target`: 100 push-ups is not a bigger
    *  commitment than 5 talks, though the number is twenty times larger. */
   scale: 'modest' | 'serious' | 'major';

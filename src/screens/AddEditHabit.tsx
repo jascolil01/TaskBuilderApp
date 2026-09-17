@@ -11,6 +11,7 @@ import type { AttributeKey, Frequency, Habit } from '../types';
 import { ATTRIBUTE_INFO, ATTRIBUTE_KEYS } from '../lib/rpg';
 import { getAffinities, resolveSecondary, SECONDARY_SHARE } from '../lib/affinity';
 import { daysUntilWake, HIBERNATE_OPTIONS, isHibernating } from '../lib/hibernate';
+import { countFor, goalsFedBy } from '../lib/goalLinks';
 import { weekdayLabel } from '../lib/date';
 
 export function AddEditHabit({ habit, onClose }: { habit: Habit | null; onClose: () => void }) {
@@ -22,6 +23,7 @@ export function AddEditHabit({ habit, onClose }: { habit: Habit | null; onClose:
   const [sleepOpen, setSleepOpen] = useState(false);
   const deleteHabit = useStore((s) => s.deleteHabit);
   const completions = useStore((s) => s.completions);
+  const goals = useStore((s) => s.goals);
   // Only to word the hint honestly — the setting is stored either way, so
   // turning reminders on later brings every quest's time with it.
   const remindersOn = useStore((s) => s.settings.enabled);
@@ -350,9 +352,18 @@ export function AddEditHabit({ habit, onClose }: { habit: Habit | null; onClose:
                 const detail = logged
                   ? `This erases ${logged} logged completion${logged === 1 ? '' : 's'} from your Chronicle and this week's boss progress.`
                   : 'It has no logged completions yet.';
+                // Any goal this quest feeds keeps the sessions it earned, and
+                // saying so is the difference between deleting a quest and
+                // fearing you're deleting a year of progress with it.
+                const fed = goalsFedBy(goals, habit.id);
+                const goalNote = fed.length
+                  ? `\n\n${fed.map((g) => g.name).join(' and ')} keeps the ${fed
+                      .map((g) => `${countFor(g, habit.id, completions)} ${g.unit}`)
+                      .join(' and ')} it counted from this quest.`
+                  : '';
                 if (
                   confirm(
-                    `Delete "${habit.name}"?\n\n${detail}\n\nYour character keeps the XP and gold it already earned. To stop tracking a quest but keep its history, use Archive instead.\n\nThis cannot be undone.`,
+                    `Delete "${habit.name}"?\n\n${detail}${goalNote}\n\nYour character keeps the XP and gold it already earned. To stop tracking a quest but keep its history, use Archive instead.\n\nThis cannot be undone.`,
                   )
                 ) {
                   deleteHabit(habit.id);

@@ -388,6 +388,25 @@ function parseGoal(raw: unknown): Goal | null {
     // Clamped to the target so a hand-edited file can't park a goal above its
     // own finish line, where it would read as complete but never have paid.
     progress: Math.max(0, Math.min(target, Math.floor(finiteNum(raw.progress, 0)))),
+    // The by-hand half of the total, kept apart from the half the linked
+    // quests derive. Absent in files that predate linking, where `progress` is
+    // read as entirely manual — so an old save needs nothing done to it.
+    ...(raw.manualProgress === undefined
+      ? {}
+      : { manualProgress: Math.max(0, Math.min(target, Math.floor(finiteNum(raw.manualProgress, 0)))) }),
+    // Links are dropped rather than trusted when malformed: a link naming a
+    // quest that isn't in the file would derive nothing anyway, and a bad
+    // `since` would silently start counting from the beginning of time.
+    ...(Array.isArray(raw.links)
+      ? {
+          links: raw.links
+            .filter(
+              (l): l is { habitId: string; since: string } =>
+                isObj(l) && typeof l.habitId === 'string' && typeof l.since === 'string' && DATE_RE.test(l.since),
+            )
+            .map((l) => ({ habitId: l.habitId, since: l.since })),
+        }
+      : {}),
     scale: GOAL_SCALES.includes(raw.scale as Goal['scale']) ? (raw.scale as Goal['scale']) : 'modest',
     startedOn: typeof raw.startedOn === 'string' && raw.startedOn ? raw.startedOn : todayStr(),
     deadline: raw.deadline,
