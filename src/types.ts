@@ -287,6 +287,12 @@ export interface ReminderSettings {
   lastBackupDate?: string | null;
   /** Set once the decay explainer has been shown, so it never repeats. */
   decayExplained?: boolean;
+  /**
+   * The weekStart of the last review read, so one that has been seen does not
+   * come back and someone returning after a month is offered the week just
+   * gone rather than four in a row.
+   */
+  lastReviewedWeek?: string | null;
 }
 
 export interface BossVictory {

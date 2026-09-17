@@ -144,6 +144,7 @@ interface Store {
   spendCheatDay: () => void;
   setReminderSettings: (patch: Partial<Pick<ReminderSettings, 'enabled' | 'time' | 'haptics'>>) => void;
   markDecayExplained: () => void;
+  markWeekReviewed: (weekStart: string) => void;
   markReminderNotified: (date: string) => void;
   runDecayCheck: () => void;
   addFromTemplates: (templateIds: string[]) => number;
@@ -374,6 +375,9 @@ export const useStore = create<Store>()(
       markReminderNotified: (date) => set((state) => ({ settings: { ...state.settings, lastNotifiedDate: date } })),
 
       markDecayExplained: () => set((state) => ({ settings: { ...state.settings, decayExplained: true } })),
+
+      markWeekReviewed: (weekStart) =>
+        set((state) => ({ settings: { ...state.settings, lastReviewedWeek: weekStart } })),
 
       runDecayCheck: () =>
         set((state) => {

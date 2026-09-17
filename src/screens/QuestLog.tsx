@@ -12,6 +12,8 @@ import { Goals } from './Goals';
 import { CoachCard } from '../components/CoachCard';
 import { daysUntilWake, isAwake, isHibernating } from '../lib/hibernate';
 import { getGoalStatus } from '../lib/goals';
+import { formatWeekRange, reviewDue } from '../lib/review';
+import { WeekReview } from './WeekReview';
 
 export function QuestLog() {
   const habits = useStore((s) => s.habits);
@@ -59,6 +61,17 @@ export function QuestLog() {
   // you still owe.
   const activeGoals = goals.filter((g) => getGoalStatus(g) === 'active').length;
 
+  // Offered rather than forced. A modal thrown at you the moment you open the
+  // app on a Sunday is a modal you learn to dismiss without reading, and the
+  // one thing this screen cannot afford is to become furniture.
+  const lastReviewedWeek = useStore((s) => s.settings.lastReviewedWeek);
+  const markWeekReviewed = useStore((s) => s.markWeekReviewed);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const owedWeek = useMemo(() => reviewDue(today, lastReviewedWeek), [today, lastReviewedWeek]);
+  // Nothing to look back on yet: a character a week old has no week to review,
+  // and an empty one reads as the app being broken rather than as a new start.
+  const hasHistory = habits.length > 0;
+
   return (
     <div className="flex flex-col gap-4 px-4 pb-28 pt-6">
       <div className="flex items-center justify-between gap-2">
@@ -101,6 +114,22 @@ export function QuestLog() {
             🔔 {incompleteCount} quest{incompleteCount > 1 ? 's' : ''} left today
           </div>
         )
+      )}
+
+      {owedWeek && hasHistory && (
+        <div className="flex items-center gap-2 rounded-xl border border-gold-500/30 bg-gold-500/[0.07] px-3 py-2.5">
+          <button onClick={() => setReviewOpen(true)} className="min-w-0 flex-1 text-left">
+            <p className="text-sm text-gold-300">📜 Your week, {formatWeekRange(owedWeek)}</p>
+            <p className="mt-0.5 text-[11px] text-white/40">How the last seven days actually went.</p>
+          </button>
+          <button
+            onClick={() => markWeekReviewed(owedWeek)}
+            aria-label="Skip this week's review"
+            className="shrink-0 px-2 text-white/25"
+          >
+            ✕
+          </button>
+        </div>
       )}
 
       {/* Below the day's status, above the list: seen on the way to the
@@ -194,6 +223,9 @@ export function QuestLog() {
       {editing && <AddEditHabit habit={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
       {browsing && <QuestBrowser onClose={() => setBrowsing(false)} />}
       {goalsOpen && <Goals onClose={() => setGoalsOpen(false)} />}
+      {reviewOpen && owedWeek && (
+        <WeekReview weekStart={owedWeek} onClose={() => setReviewOpen(false)} />
+      )}
     </div>
   );
 }
