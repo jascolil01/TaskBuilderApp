@@ -75,6 +75,8 @@ import {
 } from './lib/goals';
 import { getBossSetup, indexHabits } from './lib/bossContext';
 import { isAwake, isHibernating, wake, wakeDate } from './lib/hibernate';
+import { initialRemindedDate, isValidTime } from './lib/questReminders';
+import { currentTimeHHMM } from './lib/reminders';
 import { getTemplate } from './lib/questCatalog';
 import { getForgivenDates, getForgivenSet } from './lib/forgiveness';
 import {
@@ -145,11 +147,15 @@ interface Store {
     frequency: Frequency;
     graceDays: number;
     effort: EffortTier;
+    reminderTime?: string | null;
   }) => void;
   updateHabit: (
     id: string,
-    patch: Partial<Pick<Habit, 'name' | 'attribute' | 'secondary' | 'frequency' | 'graceDays' | 'effort'>>,
+    patch: Partial<
+      Pick<Habit, 'name' | 'attribute' | 'secondary' | 'frequency' | 'graceDays' | 'effort' | 'reminderTime'>
+    >,
   ) => void;
+  markQuestReminded: (id: string, date: string) => void;
   archiveHabit: (id: string) => void;
   hibernateHabit: (id: string, days: number) => void;
   wakeHabit: (id: string) => void;
@@ -491,6 +497,8 @@ export const useStore = create<Store>()(
               lastCompletedDate: null,
               decayedThroughDate: null,
               missedSinceCompletion: 0,
+              reminderTime: isValidTime(input.reminderTime) ? input.reminderTime : null,
+              lastRemindedDate: initialRemindedDate(input.reminderTime, currentTimeHHMM(), todayStr()),
               createdAt: new Date().toISOString(),
               archived: false,
             },
@@ -503,11 +511,30 @@ export const useStore = create<Store>()(
             if (h.id !== id) return h;
             // xpReward is derived from the tier, so it has to move with it.
             const merged = { ...h, ...patch, ...(patch.effort ? { xpReward: getEffortXp(patch.effort) } : {}) };
+            // Moving a reminder re-decides today from scratch: a time still
+            // ahead is left open so this evening's 20:00 is honoured, while a
+            // time already gone by counts as handled rather than firing the
+            // moment the form is saved.
+            const timeChanged = patch.reminderTime !== undefined && patch.reminderTime !== h.reminderTime;
             // Re-checked after the merge, not before: changing the primary can
             // strand a secondary that was valid a moment ago, and a Strength
             // quest moved to Intelligence must not keep Constitution attached.
-            return { ...merged, secondary: resolveSecondary(merged.attribute, merged.secondary) };
+            return {
+              ...merged,
+              reminderTime: isValidTime(merged.reminderTime) ? merged.reminderTime : null,
+              ...(timeChanged
+                ? { lastRemindedDate: initialRemindedDate(patch.reminderTime, currentTimeHHMM(), todayStr()) }
+                : {}),
+              secondary: resolveSecondary(merged.attribute, merged.secondary),
+            };
           }),
+        })),
+
+      // Written by the scheduler the moment a quest's own reminder fires, so
+      // the same nudge can't arrive again on the next tick.
+      markQuestReminded: (id, date) =>
+        set((state) => ({
+          habits: state.habits.map((h) => (h.id === id ? { ...h, lastRemindedDate: date } : h)),
         })),
 
       archiveHabit: (id) =>

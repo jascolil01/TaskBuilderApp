@@ -114,6 +114,7 @@ export function HabitCard({
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-white/40">
             <span>{scheduleLabel}</span>
+            {habit.reminderTime && <span className="text-white/35">⏰ {habit.reminderTime}</span>}
             {offSchedule && <span className="text-white/35">no streak credit</span>}
             {habit.streak > 0 && <span className="text-gold-400/90">🔥 {habit.streak} day streak</span>}
             {tier > 0 && (

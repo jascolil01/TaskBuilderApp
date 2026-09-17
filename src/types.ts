@@ -59,6 +59,13 @@ export interface Habit {
    * throws away a streak you did nothing to deserve losing.
    */
   hibernatingUntil?: string | null;
+  /**
+   * Its own reminder time, HH:MM, or absent for none. A quest with one is
+   * left out of the global reminder's count, so nothing is announced twice.
+   */
+  reminderTime?: string | null;
+  /** Last day this quest's own reminder fired, so it fires once a day. */
+  lastRemindedDate?: string | null;
   createdAt: string;
   archived: boolean;
 }

@@ -15,6 +15,7 @@ import type {
   Vacation,
 } from '../types';
 import { getEffortXp, inferEffort, isEffortTier } from './effort';
+import { isValidTime } from './questReminders';
 import { ATTRIBUTE_KEYS, SIGNATURE_LEVEL } from './rpg';
 import { clampTier, tierForStreak } from './streak';
 import { isClassId } from './classes';
@@ -221,6 +222,9 @@ function parseHabit(raw: unknown): Habit | null {
     lastCompletedDate: nullableDate(raw.lastCompletedDate),
     decayedThroughDate: nullableDate(raw.decayedThroughDate),
     missedSinceCompletion: Math.max(0, Math.floor(finiteNum(raw.missedSinceCompletion, 0))),
+    // A quest's own reminder survives a restore; an invalid one is dropped
+    // rather than stored, so the scheduler never has to guard against it.
+    ...(isValidTime(raw.reminderTime) ? { reminderTime: raw.reminderTime } : {}),
     // A sleeping quest stays asleep across a restore; a past date simply
     // reads as awake, so no validation beyond the type is needed.
     ...(typeof raw.hibernatingUntil === 'string' && raw.hibernatingUntil

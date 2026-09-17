@@ -22,6 +22,9 @@ export function AddEditHabit({ habit, onClose }: { habit: Habit | null; onClose:
   const [sleepOpen, setSleepOpen] = useState(false);
   const deleteHabit = useStore((s) => s.deleteHabit);
   const completions = useStore((s) => s.completions);
+  // Only to word the hint honestly — the setting is stored either way, so
+  // turning reminders on later brings every quest's time with it.
+  const remindersOn = useStore((s) => s.settings.enabled);
 
   const [name, setName] = useState(habit?.name ?? '');
   const [attribute, setAttribute] = useState<AttributeKey>(habit?.attribute ?? 'STR');
@@ -36,6 +39,7 @@ export function AddEditHabit({ habit, onClose }: { habit: Habit | null; onClose:
     habit && habit.frequency.type === 'weekly' ? habit.frequency.days : [1, 2, 3, 4, 5],
   );
   const [graceDays, setGraceDays] = useState(habit?.graceDays ?? 2);
+  const [reminderTime, setReminderTime] = useState<string | null>(habit?.reminderTime ?? null);
   const [effort, setEffort] = useState<EffortTier>(habit?.effort ?? inferEffort(habit?.xpReward ?? 20));
 
   const toggleDay = (d: number) => setDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
@@ -46,9 +50,17 @@ export function AddEditHabit({ habit, onClose }: { habit: Habit | null; onClose:
     if (!canSave) return;
     const frequency: Frequency = isDaily ? { type: 'daily' } : { type: 'weekly', days };
     if (habit) {
-      updateHabit(habit.id, { name, attribute, secondary: validSecondary, frequency, graceDays, effort });
+      updateHabit(habit.id, {
+        name,
+        attribute,
+        secondary: validSecondary,
+        frequency,
+        graceDays,
+        effort,
+        reminderTime,
+      });
     } else {
-      addHabit({ name, attribute, secondary: validSecondary, frequency, graceDays, effort });
+      addHabit({ name, attribute, secondary: validSecondary, frequency, graceDays, effort, reminderTime });
     }
     onClose();
   };
@@ -173,6 +185,36 @@ export function AddEditHabit({ habit, onClose }: { habit: Habit | null; onClose:
           Miss this quest for more than {graceDays} scheduled day{graceDays === 1 ? '' : 's'} in a row and its
           attribute starts losing XP each day until you complete it again.
         </p>
+
+        <label className="mt-5 block text-xs uppercase tracking-wide text-white/50">Remind me about this one</label>
+        <p className="mt-0.5 text-[11px] text-white/30">
+          {remindersOn
+            ? 'Optional. A quest with its own time is left out of the daily catch-all reminder, so nothing is announced twice.'
+            : 'Turn reminders on in Settings for this to do anything. Your choice is kept either way.'}
+        </p>
+        {reminderTime === null ? (
+          <button
+            onClick={() => setReminderTime('08:00')}
+            className="mt-2 w-full rounded-lg border border-white/15 py-2 text-xs text-white/60"
+          >
+            ⏰ Give it its own time
+          </button>
+        ) : (
+          <div className="mt-2 flex gap-2">
+            <input
+              type="time"
+              value={reminderTime}
+              onChange={(e) => setReminderTime(e.target.value || null)}
+              className="flex-1 rounded-lg border border-white/15 bg-ink-900 px-3 py-2 text-white outline-none focus:border-gold-500/70"
+            />
+            <button
+              onClick={() => setReminderTime(null)}
+              className="shrink-0 rounded-lg border border-white/12 px-3 text-xs text-white/45"
+            >
+              Clear
+            </button>
+          </div>
+        )}
 
         <label className="mt-5 block text-xs uppercase tracking-wide text-white/50">How much work is it?</label>
         <p className="mt-0.5 text-[11px] text-white/30">
